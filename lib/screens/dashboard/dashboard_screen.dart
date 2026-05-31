@@ -7,6 +7,7 @@ import '../../providers/auth_provider.dart';
 import '../../services/api_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/widgets.dart';
+import '../cotisations/cotisations_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -26,6 +27,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void initState() {
     super.initState();
     _load();
+    // Retour éventuel d'un "join via code" effectué pendant l'inscription
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final auth = context.read<AuthProvider>();
+      final notice = auth.joinNotice;
+      if (notice != null) {
+        auth.joinNoticeOk ? showSuccess(context, notice) : showError(context, notice);
+        auth.clearJoinNotice();
+      }
+    });
   }
 
   Future<void> _load() async {
@@ -49,6 +60,91 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _loading = false;
       });
     }
+  }
+
+  // Ouvre le paiement de la cotisation d'une tontine depuis un rappel
+  Future<void> _payer(RappelCotisation r) async {
+    try {
+      final res = await _api.getTontineById(r.tontineId);
+      if (!mounted) return;
+      final tontine = Tontine.fromJson(res['data']);
+      await Navigator.push(context, MaterialPageRoute(
+          builder: (_) => CotisationsScreen(tontine: tontine, openPay: true)));
+      _load();
+    } catch (_) {
+      if (mounted) showError(context, 'Impossible d\'ouvrir le paiement');
+    }
+  }
+
+  // Carte de rappel des cotisations dues ce mois-ci
+  Widget _rappelCard(NumberFormat fmt) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: AppColors.accentGradient,
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.notifications_active_rounded,
+                  color: Colors.white, size: 20),
+              const SizedBox(width: 8),
+              Text('Rappel de cotisation',
+                  style: soraStyle(size: 15, weight: FontWeight.w700,
+                      color: Colors.white)),
+              const Spacer(),
+              Text('${fmt.format(_data!.montantDuMois)} FCFA',
+                  style: soraStyle(size: 15, weight: FontWeight.w700,
+                      color: Colors.white)),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Text('À régler ce mois-ci',
+              style: interStyle(size: 12, color: Colors.white70)),
+          const SizedBox(height: 12),
+          ..._data!.rappels.map((r) => Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(r.tontineNom,
+                              style: interStyle(size: 13,
+                                  weight: FontWeight.w600, color: Colors.white)),
+                          Text(
+                              '${fmt.format(r.montant)} FCFA${r.parts > 1 ? ' · ${r.parts} parts' : ''}',
+                              style: interStyle(size: 11, color: Colors.white70)),
+                        ],
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () => _payer(r),
+                      style: TextButton.styleFrom(
+                          backgroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 4)),
+                      child: Text('Payer',
+                          style: interStyle(size: 12, weight: FontWeight.w700,
+                              color: AppColors.primary)),
+                    ),
+                  ],
+                ),
+              )),
+        ],
+      ),
+    );
   }
 
   @override
@@ -152,6 +248,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      // ============ RAPPEL DE COTISATION ============
+                      if ((_data?.rappels.isNotEmpty ?? false))
+                        _rappelCard(fmt),
+
                       // ================= STATS =================
                       Row(
                         children: [
@@ -167,7 +267,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           Expanded(
                             child: _statCard(
                               "Membres",
-                              "${_data?.totalTontines ?? 0}",
+                              "${_data?.totalMembres ?? 0}",
                               Icons.people,
                               AppColors.success,
                             ),
@@ -182,7 +282,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           Expanded(
                             child: _statCard(
                               "Collecte",
-                              "${fmt.format(_data?.totalCotisations ?? 0)}",
+                              "${fmt.format(_data?.totalCollecte ?? 0)}",
                               Icons.monetization_on,
                               AppColors.gold,
                             ),
@@ -194,6 +294,31 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               "${_data?.urgencesEnCours ?? 0}",
                               Icons.warning,
                               AppColors.error,
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      const SizedBox(height: 10),
+
+                      // ============ STATS PERSONNELLES ============
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _statCard(
+                              "J'ai cotisé",
+                              fmt.format(_data?.totalCotise ?? 0),
+                              Icons.savings,
+                              AppColors.accent,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: _statCard(
+                              "Dû ce mois",
+                              fmt.format(_data?.montantDuMois ?? 0),
+                              Icons.event_busy,
+                              AppColors.warning,
                             ),
                           ),
                         ],
@@ -211,10 +336,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                       const SizedBox(height: 10),
 
-                      if ((_data?.activiteRecente ?? []).isEmpty)
+                      if ((_data?.activitesRecentes ?? []).isEmpty)
                         const Text("Aucune activité")
                       else
-                        ..._data!.activiteRecente.map(_activityCard),
+                        ..._data!.activitesRecentes.map(_activityCard),
                     ],
                   ),
                 ),

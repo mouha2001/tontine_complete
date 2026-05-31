@@ -20,7 +20,7 @@ class ActivityItem extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 12),
       decoration: const BoxDecoration(
         border: Border(
-          bottom: BorderSide(color: AppTheme.creamDark),
+          bottom: BorderSide(color: AppColors.creamDark),
         ),
       ),
       child: Row(
@@ -48,7 +48,7 @@ class ActivityItem extends StatelessWidget {
                   time,
                   style: GoogleFonts.dmSans(
                     fontSize: 11,
-                    color: AppTheme.textLight,
+                    color: AppColors.textLight,
                   ),
                 ),
               ],
@@ -68,7 +68,7 @@ class ActivityItem extends StatelessWidget {
           text: parts[i],
           style: GoogleFonts.dmSans(
             fontSize: 13,
-            color: AppTheme.textMid,
+            color: AppColors.textMid,
           ),
         ));
       } else {
@@ -77,7 +77,7 @@ class ActivityItem extends StatelessWidget {
           style: GoogleFonts.dmSans(
             fontSize: 13,
             fontWeight: FontWeight.w600,
-            color: AppTheme.textDark,
+            color: AppColors.textDark,
           ),
         ));
       }

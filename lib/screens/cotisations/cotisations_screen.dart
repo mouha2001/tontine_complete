@@ -233,6 +233,9 @@ class _PaySheetState extends State<_PaySheet> {
   String _methode = 'wave';
   bool _loading   = false;
 
+  int get _mesParts => widget.tontine.mesParts > 0 ? widget.tontine.mesParts : 1;
+  double get _montantDu => widget.tontine.montantCotisation * _mesParts;
+
   static const _methodes = [
     {'value': 'wave',         'label': 'Wave',         'icon': Icons.waves_rounded},
     {'value': 'orange_money', 'label': 'Orange Money', 'icon': Icons.phone_android_rounded},
@@ -244,7 +247,7 @@ class _PaySheetState extends State<_PaySheet> {
     setState(() => _loading = true);
     try {
       await _api.payerCotisation(widget.tontine.id, {
-        'montant': widget.tontine.montantCotisation,
+        'montant': _montantDu,
         'methode_paiement': _methode,
         'reference': _refCtrl.text.trim(),
       });
@@ -286,10 +289,15 @@ class _PaySheetState extends State<_PaySheet> {
                 children: [
                   const TextSpan(text: 'Montant : '),
                   TextSpan(
-                    text: '${fmt.format(widget.tontine.montantCotisation)} FCFA',
+                    text: '${fmt.format(_montantDu)} FCFA',
                     style: interStyle(size: 15, weight: FontWeight.w700,
                         color: AppColors.accent),
                   ),
+                  if (_mesParts > 1)
+                    TextSpan(
+                      text: '  ($_mesParts parts × ${fmt.format(widget.tontine.montantCotisation)})',
+                      style: interStyle(size: 12, color: AppColors.textLight),
+                    ),
                 ],
               ),
             ),

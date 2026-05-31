@@ -15,6 +15,11 @@ class AppColors {
   static const Color error      = Color(0xFFEF4444);
   static const Color gold       = Color(0xFFFFB547);
 
+  // Alias de compatibilité — widgets du dashboard issus d'une palette antérieure
+  static const Color creamDark  = border;    // bordures douces
+  static const Color earth      = primary;   // fond « featured » / accent foncé
+  static const Color textMid    = textGrey;  // texte secondaire
+
   static const LinearGradient darkGradient = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,

@@ -24,10 +24,10 @@ class SuturaController extends Controller
             $this->authorizeAccessToTontine($user, $tontineId);
             $query->where('tontine_id', $tontineId);
         } else {
-            // Toutes les urgences des tontines accessibles
-            $tontineIds = $user->isAdmin
-                ? $user->tontinesAdmin()->pluck('id')
-                : $user->tontinesMembre()->pluck('tontines.id');
+            // Toutes les urgences des tontines accessibles (créées + rejointes)
+            $tontineIds = Tontine::where('admin_id', $user->id)
+                ->orWhereHas('membres', fn($q) => $q->where('user_id', $user->id))
+                ->pluck('id');
             $query->whereIn('tontine_id', $tontineIds);
         }
 
@@ -139,13 +139,24 @@ class SuturaController extends Controller
     // ─── CALCUL RÉSULTAT ──────────────────────────────────────────────────────
     private function calculerResultat(Sutura $sutura): void
     {
-        $totalMembres = $sutura->tontine->membres()->count() - 1; // -1 : demandeur ne vote pas
-        $totalVotes   = SuturaVote::where('sutura_id', $sutura->id)->count();
+        // Votants éligibles = membres - 1 (le demandeur ne vote pas)
+        $eligible = max(1, $sutura->tontine->membres()->count() - 1);
+        $needed   = intdiv($eligible, 2) + 1; // majorité stricte
 
-        if ($totalVotes < $totalMembres) return; // pas tous voté
+        $votesOui   = SuturaVote::where(['sutura_id' => $sutura->id, 'approuve' => true])->count();
+        $votesNon   = SuturaVote::where(['sutura_id' => $sutura->id, 'approuve' => false])->count();
+        $totalVotes = $votesOui + $votesNon;
 
-        $votesOui = SuturaVote::where(['sutura_id' => $sutura->id, 'approuve' => true])->count();
-        $approuve = $votesOui > ($totalMembres / 2);
+        // On tranche dès qu'une majorité est acquise, sans attendre tous les votes
+        if ($votesOui >= $needed) {
+            $approuve = true;
+        } elseif ($votesNon >= $needed) {
+            $approuve = false;
+        } elseif ($totalVotes >= $eligible) {
+            $approuve = false; // tous ont voté sans majorité « oui » → rejetée
+        } else {
+            return; // résultat pas encore décidé
+        }
 
         $sutura->update([
             'statut'      => $approuve ? 'approuve' : 'rejete',
@@ -179,6 +190,8 @@ class SuturaController extends Controller
         $votesOui  = $s->votes()->where('approuve', true)->count();
         $votesNon  = $s->votes()->where('approuve', false)->count();
         $monVote   = $s->votes()->where('user_id', $currentUserId)->first();
+        $eligible  = max(1, $s->tontine->membres()->count() - 1);
+        $estMien   = $s->demandeur_id === $currentUserId; // visible UNIQUEMENT par le demandeur
 
         return [
             'id'              => $s->id,
@@ -189,8 +202,11 @@ class SuturaController extends Controller
             'votes_oui'       => $votesOui,
             'votes_non'       => $votesNon,
             'total_votants'   => $votesOui + $votesNon,
+            'total_eligibles' => $eligible,
             'mon_vote'        => $monVote ? $monVote->approuve : null,
-            // JAMAIS exposé : demandeur_id
+            'est_mien'        => $estMien,
+            'peut_voter'      => $s->statut === 'en_cours' && !$estMien && $monVote === null,
+            // JAMAIS exposé : demandeur_id (anonymat). est_mien est calculé par utilisateur.
             'tontine'         => $s->tontine ? ['nom' => $s->tontine->nom] : null,
             'resultat_at'     => $s->resultat_at?->toISOString(),
             'created_at'      => $s->created_at->toISOString(),

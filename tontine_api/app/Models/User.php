@@ -13,6 +13,7 @@ class User extends Authenticatable
 
     protected $fillable = [
         'nom',
+        'prenom',
         'telephone',
         'email',
         'adresse',
@@ -43,11 +44,13 @@ class User extends Authenticatable
 
     public function getInitialesAttribute(): string
     {
-        $parts = explode(' ', trim($this->nom));
-        if (count($parts) >= 2) {
-            return strtoupper($parts[0][0] . $parts[1][0]);
+        $prenom = trim((string) $this->prenom);
+        $nom    = trim((string) $this->nom);
+        if ($prenom !== '' && $nom !== '') {
+            return strtoupper($prenom[0] . $nom[0]);
         }
-        return strtoupper(substr($this->nom, 0, 2));
+        $base = $prenom !== '' ? $prenom : $nom;
+        return strtoupper(substr($base, 0, 2));
     }
 
     // ─── OTP ──────────────────────────────────────────────────────────────────
@@ -86,7 +89,7 @@ class User extends Authenticatable
     public function tontinesMembre()
     {
         return $this->belongsToMany(Tontine::class, 'tontine_membres')
-                    ->withPivot(['ordre_tirage', 'a_recu_fonds'])
+                    ->withPivot(['ordre_tirage', 'nombre_parts', 'parts_recues'])
                     ->withTimestamps();
     }
 
@@ -116,6 +119,7 @@ class User extends Authenticatable
         return [
             'id'         => $this->id,
             'nom'        => $this->nom,
+            'prenom'     => $this->prenom,
             'telephone'  => $this->telephone,
             'email'      => $this->email,
             'adresse'    => $this->adresse,

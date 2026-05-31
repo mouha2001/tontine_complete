@@ -9,97 +9,112 @@ use App\Models\Sutura;
 use App\Models\Tontine;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\DB;
 
 class DashboardController extends Controller
 {
+    // Identifiants des tontines de l'utilisateur : créées (admin_id) + rejointes.
+    private function tontineIds($user)
+    {
+        return Tontine::where('admin_id', $user->id)
+            ->orWhereHas('membres', fn($q) => $q->where('user_id', $user->id))
+            ->pluck('id');
+    }
+
     public function stats(Request $request): JsonResponse
     {
-        $user = $request->user();
+        $user       = $request->user();
+        $tontineIds = $this->tontineIds($user);
 
-        if ($user->isAdmin) {
-            return $this->adminStats($user);
-        }
-        return $this->membreStats($user);
-    }
+        $totalMembres = DB::table('tontine_membres')
+            ->whereIn('tontine_id', $tontineIds)
+            ->distinct('user_id')
+            ->count('user_id');
 
-    private function adminStats($user): JsonResponse
-    {
-        $tontineIds = $user->tontinesAdmin()->pluck('id');
+        $totalCollecte = Cotisation::whereIn('tontine_id', $tontineIds)
+            ->where('statut', 'confirme')
+            ->sum('montant');
 
-        $totalMembres   = \DB::table('tontine_membres')
-                            ->whereIn('tontine_id', $tontineIds)
-                            ->distinct('user_id')
-                            ->count('user_id');
-
-        $totalCollecte  = Cotisation::whereIn('tontine_id', $tontineIds)
-                            ->where('statut', 'confirme')
-                            ->sum('montant');
-
-        $tontinesActives = Tontine::where('admin_id', $user->id)
-                            ->where('statut', 'active')
-                            ->count();
+        $tontinesActives = Tontine::whereIn('id', $tontineIds)
+            ->where('statut', 'active')
+            ->count();
 
         $urgencesEnCours = Sutura::whereIn('tontine_id', $tontineIds)
-                            ->where('statut', 'en_cours')
-                            ->count();
+            ->where('statut', 'en_cours')
+            ->count();
 
-        $cotisationsRecentes = Cotisation::with(['user', 'tontine'])
-                            ->whereIn('tontine_id', $tontineIds)
-                            ->where('statut', 'confirme')
-                            ->orderByDesc('paye_le')
-                            ->limit(5)
-                            ->get()
-                            ->map(fn($c) => [
-                                'type'       => 'cotisation',
-                                'label'      => "{$c->user->nom} a cotisé {$c->montant} FCFA",
-                                'tontine'    => $c->tontine->nom,
-                                'created_at' => $c->paye_le?->toISOString() ?? $c->created_at->toISOString(),
-                            ]);
+        $activitesRecentes = Cotisation::with(['user', 'tontine'])
+            ->whereIn('tontine_id', $tontineIds)
+            ->where('statut', 'confirme')
+            ->orderByDesc('paye_le')
+            ->limit(5)
+            ->get()
+            ->map(fn($c) => [
+                'type'       => 'cotisation',
+                'label'      => trim("{$c->user->prenom} {$c->user->nom}") . " a cotisé {$c->montant} FCFA",
+                'tontine'    => $c->tontine->nom,
+                'created_at' => $c->paye_le?->toISOString() ?? $c->created_at->toISOString(),
+            ]);
 
-        return response()->json([
-            'total_tontines'    => $user->tontinesAdmin()->count(),
-            'tontines_actives'  => $tontinesActives,
-            'total_membres'     => $totalMembres,
-            'total_collecte'    => $totalCollecte,
-            'urgences_en_cours' => $urgencesEnCours,
-            'activites_recentes' => $cotisationsRecentes,
-        ]);
-    }
-
-    private function membreStats($user): JsonResponse
-    {
-        $tontineIds = $user->tontinesMembre()->pluck('tontines.id');
-
+        // ── Stats personnelles ──
         $totalCotise = Cotisation::where('user_id', $user->id)
-                        ->where('statut', 'confirme')
-                        ->sum('montant');
+            ->where('statut', 'confirme')
+            ->sum('montant');
 
-        $cotisationsEnAttente = Cotisation::where('user_id', $user->id)
-                        ->where('statut', 'en_attente')
-                        ->count();
+        // ── Rappels de cotisation : tontines actives non payées CE MOIS-CI ──
+        // (montant dû = cotisation × parts du membre, aligné sur le tirage mensuel)
+        $rappels = [];
+        $montantDuMois = 0;
 
-        $votesEnCours = Sutura::whereIn('tontine_id', $tontineIds)
-                        ->where('statut', 'en_cours')
-                        ->where('demandeur_id', '!=', $user->id)
-                        ->whereDoesntHave('votes', fn($q) => $q->where('user_id', $user->id))
-                        ->count();
+        $tontinesActivesUser = Tontine::whereIn('id', $tontineIds)
+            ->where('statut', 'active')
+            ->get();
+
+        foreach ($tontinesActivesUser as $t) {
+            $parts = (int) (DB::table('tontine_membres')
+                ->where('tontine_id', $t->id)
+                ->where('user_id', $user->id)
+                ->value('nombre_parts') ?? 0);
+
+            if ($parts === 0) continue; // pas membre
+
+            $aPaye = Cotisation::where('tontine_id', $t->id)
+                ->where('user_id', $user->id)
+                ->where('statut', 'confirme')
+                ->whereYear('paye_le', now()->year)
+                ->whereMonth('paye_le', now()->month)
+                ->exists();
+
+            if (!$aPaye) {
+                $montant = (float) $t->montant_cotisation * $parts;
+                $rappels[] = [
+                    'tontine_id'  => $t->id,
+                    'tontine_nom' => $t->nom,
+                    'parts'       => $parts,
+                    'montant'     => $montant,
+                ];
+                $montantDuMois += $montant;
+            }
+        }
 
         return response()->json([
-            'nb_tontines'              => $tontineIds->count(),
-            'total_cotise'             => $totalCotise,
-            'cotisations_en_attente'   => $cotisationsEnAttente,
-            'votes_en_attente'         => $votesEnCours,
+            'total_tontines'      => $tontineIds->count(),
+            'tontines_actives'    => $tontinesActives,
+            'total_membres'       => $totalMembres,
+            'total_collecte'      => $totalCollecte,
+            'urgences_en_cours'   => $urgencesEnCours,
+            'total_cotise'        => $totalCotise,
+            'montant_du_mois'     => $montantDuMois,
+            'rappels_cotisation'  => $rappels,
+            'activites_recentes'  => $activitesRecentes,
         ]);
     }
 
     public function activites(Request $request): JsonResponse
     {
-        $user  = $request->user();
-        $limit = min($request->integer('limit', 10), 50);
-
-        $tontineIds = $user->isAdmin
-            ? $user->tontinesAdmin()->pluck('id')
-            : $user->tontinesMembre()->pluck('tontines.id');
+        $user       = $request->user();
+        $limit      = min($request->integer('limit', 10), 50);
+        $tontineIds = $this->tontineIds($user);
 
         $activites = Cotisation::with(['user', 'tontine'])
             ->whereIn('tontine_id', $tontineIds)
@@ -111,7 +126,7 @@ class DashboardController extends Controller
                 'id'         => $c->id,
                 'type'       => 'cotisation',
                 'emoji'      => '💳',
-                'label'      => "{$c->user->nom} — {$c->montant} FCFA",
+                'label'      => trim("{$c->user->prenom} {$c->user->nom}") . " — {$c->montant} FCFA",
                 'tontine'    => $c->tontine->nom,
                 'methode'    => $c->methode_paiement,
                 'created_at' => $c->paye_le?->toISOString() ?? $c->created_at->toISOString(),

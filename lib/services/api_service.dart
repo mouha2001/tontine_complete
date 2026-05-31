@@ -51,6 +51,7 @@ class ApiService {
     required String role,
     String? prenom,
     String? nom,
+    String? inviteCode,
   }) async {
     final res = await _dio.post('/auth/verify-otp', data: {
       'telephone': telephone,
@@ -58,6 +59,7 @@ class ApiService {
       'role': role,
       if (prenom != null) 'prenom': prenom,
       if (nom != null) 'nom': nom,
+      if (inviteCode != null && inviteCode.isNotEmpty) 'invite_code': inviteCode,
     });
     return res.data;
   }
@@ -103,9 +105,10 @@ class ApiService {
     return res.data;
   }
 
-  Future<Map<String, dynamic>> joinTontine(String code) async {
-    final res = await _dio.post('/tontines/join-invite', data: {
-      'code': code,
+  Future<Map<String, dynamic>> joinTontine(String code, {int parts = 1}) async {
+    final res = await _dio.post('/tontines/join', data: {
+      'invite_code': code,
+      'nombre_parts': parts,
     });
     return res.data;
   }
@@ -153,12 +156,39 @@ class ApiService {
   // =====================================================
 
   Future<Map<String, dynamic>> getSuturas(int tontineId) async {
-    final res = await _dio.get('/sutura');
+    final res = await _dio.get('/sutura',
+        queryParameters: {'tontine_id': tontineId});
     return res.data;
   }
 
-  Future<Map<String, dynamic>> voterSutura(int id) async {
-    final res = await _dio.post('/sutura/$id/voter');
+  Future<Map<String, dynamic>> createSutura(
+      int tontineId, double montant, String motif) async {
+    final res = await _dio.post('/sutura', data: {
+      'tontine_id': tontineId,
+      'montant_demande': montant,
+      'motif': motif,
+    });
+    return res.data;
+  }
+
+  Future<Map<String, dynamic>> voterSutura(int id, bool approuve) async {
+    final res = await _dio.post('/sutura/$id/voter', data: {
+      'approuve': approuve,
+    });
+    return res.data;
+  }
+
+  // =====================================================
+  // TIRAGE
+  // =====================================================
+
+  Future<Map<String, dynamic>> lancerTirage(int tontineId) async {
+    final res = await _dio.post('/tontines/$tontineId/tirage');
+    return res.data;
+  }
+
+  Future<Map<String, dynamic>> getTirages(int tontineId) async {
+    final res = await _dio.get('/tontines/$tontineId/tirage/historique');
     return res.data;
   }
 
@@ -169,6 +199,11 @@ class ApiService {
   Future<Map<String, dynamic>> getNotifications() async {
     final res = await _dio.get('/notifications');
     return res.data;
+  }
+
+  Future<int> getUnreadCount() async {
+    final res = await _dio.get('/notifications/non-lues');
+    return (res.data['count'] as num?)?.toInt() ?? 0;
   }
 
   Future<void> markNotificationRead(int id) async {

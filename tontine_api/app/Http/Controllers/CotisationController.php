@@ -53,17 +53,20 @@ class CotisationController extends Controller
     {
         $request->validate([
             'tontine_id'       => 'required|integer|exists:tontines,id',
-            'montant'          => 'required|numeric|min:1',
             'methode_paiement' => 'required|in:wave,orange_money',
         ]);
 
         $user    = $request->user();
         $tontine = Tontine::findOrFail($request->tontine_id);
 
-        // Vérifier que l'utilisateur est membre
-        if (!$tontine->membres()->where('user_id', $user->id)->exists()) {
+        // Vérifier que l'utilisateur est membre et récupérer ses parts
+        $parts = $tontine->membres()->where('user_id', $user->id)->value('tontine_membres.nombre_parts');
+        if ($parts === null) {
             return response()->json(['message' => 'Vous n\'êtes pas membre de cette tontine'], 403);
         }
+
+        // Montant calculé côté serveur : cotisation × nombre de parts du membre
+        $montant = $tontine->montant_cotisation * (int) $parts;
 
         $reference = 'TON-' . strtoupper(Str::random(12));
 
@@ -71,7 +74,7 @@ class CotisationController extends Controller
         $cotisation = Cotisation::create([
             'tontine_id'       => $tontine->id,
             'user_id'          => $user->id,
-            'montant'          => $request->montant,
+            'montant'          => $montant,
             'statut'           => 'en_attente',
             'methode_paiement' => $request->methode_paiement,
             'reference'        => $reference,
@@ -80,7 +83,7 @@ class CotisationController extends Controller
         // Appeler l'API de paiement
         $result = $this->paiementService->initier(
             methode: $request->methode_paiement,
-            montant: $request->montant,
+            montant: $montant,
             reference: $reference,
             telephone: $user->telephone,
             description: "Cotisation tontine {$tontine->nom}",

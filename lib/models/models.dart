@@ -35,8 +35,13 @@ class Tontine {
   final String frequence;
   final int nombreMembres;
   final int membresActifs;
+  final int partsTotal;       // capacité en parts/tours (= nombre_membres)
+  final int partsActuelles;   // somme des parts déjà prises
+  final int placesRestantes;  // parts encore disponibles
+  final int mesParts;         // parts de l'utilisateur courant
   final String statut;
   final String? code;
+  final String? inviteUrl;
   final double totalCagnotte;
   final bool estAdmin;
   final DateTime? dateDebut;
@@ -45,7 +50,9 @@ class Tontine {
     required this.id, required this.nom, this.description,
     required this.montantCotisation, required this.frequence,
     required this.nombreMembres, required this.membresActifs,
-    required this.statut, this.code, required this.totalCagnotte,
+    this.partsTotal = 0, this.partsActuelles = 0,
+    this.placesRestantes = 0, this.mesParts = 0,
+    required this.statut, this.code, this.inviteUrl, required this.totalCagnotte,
     this.estAdmin = false, this.dateDebut,
   });
 
@@ -56,10 +63,15 @@ class Tontine {
     montantCotisation: double.tryParse('${j['montant_cotisation'] ?? 0}') ?? 0,
     frequence: j['frequence'] ?? 'mensuel',
     nombreMembres: j['nombre_membres'] ?? 0,
-    membresActifs: j['membres_actifs'] ?? 0,
+    membresActifs: j['membres_actuels'] ?? 0,
+    partsTotal: j['nombre_parts_total'] ?? j['nombre_membres'] ?? 0,
+    partsActuelles: j['parts_actuelles'] ?? 0,
+    placesRestantes: j['places_restantes'] ?? 0,
+    mesParts: j['mes_parts'] ?? 0,
     statut: j['statut'] ?? 'active',
-    code: j['code'],
-    totalCagnotte: double.tryParse('${j['total_cagnotte'] ?? 0}') ?? 0,
+    code: j['invite_code'],
+    inviteUrl: j['invite_url'],
+    totalCagnotte: double.tryParse('${j['total_collecte'] ?? 0}') ?? 0,
     estAdmin: j['est_admin'] == true,
     dateDebut: j['date_debut'] != null ? DateTime.tryParse(j['date_debut']) : null,
   );
@@ -82,8 +94,10 @@ class Tontine {
 
   String get frequenceLabel {
     switch (frequence) {
+      case 'quotidien': return 'Quotidien';
       case 'hebdomadaire': return 'Hebdomadaire';
       case 'bimensuel': return 'Bimensuel';
+      case 'bimestriel': return 'Bimestriel';
       default: return 'Mensuel';
     }
   }
@@ -140,28 +154,82 @@ class Cotisation {
   }
 }
 
-// ── SUTURA (Tirage) ───────────────────────────────────────
-class Sutura {
+// ── TIRAGE (historique des tours) ─────────────────────────
+class Tirage {
   final int id;
   final int tour;
-  final String? beneficiaire;
-  final double montantRecu;
+  final String? gagnant;
+  final double montant;
   final DateTime? date;
-  final String statut;
 
-  Sutura({required this.id, required this.tour, this.beneficiaire,
-          required this.montantRecu, this.date, required this.statut});
+  Tirage({required this.id, required this.tour, this.gagnant,
+          required this.montant, this.date});
+
+  factory Tirage.fromJson(Map<String, dynamic> j) => Tirage(
+    id: j['id'] ?? 0,
+    tour: j['tour'] ?? 0,
+    gagnant: j['gagnant'] != null
+        ? '${j['gagnant']['prenom'] ?? ''} ${j['gagnant']['nom'] ?? ''}'.trim()
+        : null,
+    montant: double.tryParse('${j['montant_attribue'] ?? 0}') ?? 0,
+    date: j['created_at'] != null ? DateTime.tryParse(j['created_at']) : null,
+  );
+}
+
+// ── SUTURA (demande d'urgence) ────────────────────────────
+class Sutura {
+  final int id;
+  final int tontineId;
+  final double montantDemande;
+  final String motif;
+  final String statut;         // en_cours / approuve / rejete
+  final int votesOui;
+  final int votesNon;
+  final int totalVotants;
+  final int totalEligibles;
+  final bool? monVote;         // null = pas encore voté
+  final bool estMien;          // visible uniquement par le demandeur (anonymat)
+  final bool peutVoter;
+  final DateTime? createdAt;
+
+  Sutura({
+    required this.id, required this.tontineId, required this.montantDemande,
+    required this.motif, required this.statut, this.votesOui = 0,
+    this.votesNon = 0, this.totalVotants = 0, this.totalEligibles = 0,
+    this.monVote, this.estMien = false, this.peutVoter = false, this.createdAt,
+  });
 
   factory Sutura.fromJson(Map<String, dynamic> j) => Sutura(
     id: j['id'] ?? 0,
-    tour: j['tour'] ?? 0,
-    beneficiaire: j['beneficiaire'] != null
-        ? '${j['beneficiaire']['prenom']} ${j['beneficiaire']['nom']}'
-        : j['beneficiaire_nom'],
-    montantRecu: double.tryParse('${j['montant_recu'] ?? 0}') ?? 0,
-    date: j['date'] != null ? DateTime.tryParse(j['date']) : null,
-    statut: j['statut'] ?? 'effectue',
+    tontineId: j['tontine_id'] ?? 0,
+    montantDemande: double.tryParse('${j['montant_demande'] ?? 0}') ?? 0,
+    motif: j['motif'] ?? '',
+    statut: j['statut'] ?? 'en_cours',
+    votesOui: j['votes_oui'] ?? 0,
+    votesNon: j['votes_non'] ?? 0,
+    totalVotants: j['total_votants'] ?? 0,
+    totalEligibles: j['total_eligibles'] ?? 0,
+    monVote: j['mon_vote'],
+    estMien: j['est_mien'] == true,
+    peutVoter: j['peut_voter'] == true,
+    createdAt: j['created_at'] != null ? DateTime.tryParse(j['created_at']) : null,
   );
+
+  String get statutLabel {
+    switch (statut) {
+      case 'approuve': return 'Approuvée';
+      case 'rejete': return 'Rejetée';
+      default: return 'En cours';
+    }
+  }
+
+  Color get statutColor {
+    switch (statut) {
+      case 'approuve': return AppColors.success;
+      case 'rejete': return AppColors.error;
+      default: return AppColors.warning;
+    }
+  }
 }
 
 // ── NOTIFICATION ──────────────────────────────────────────
@@ -181,7 +249,8 @@ class AppNotification {
     titre: j['titre'] ?? '',
     message: j['message'] ?? '',
     type: j['type'] ?? 'info',
-    lue: j['lue'] == true || j['lue'] == 1,
+    // l'API renvoie `lu` (et non `lue`) — fallback de sécurité
+    lue: j['lu'] == true || j['lu'] == 1 || j['lue'] == true,
     createdAt: j['created_at'] != null ? DateTime.tryParse(j['created_at']) : null,
   );
 
@@ -205,32 +274,58 @@ class AppNotification {
 }
 
 // ── DASHBOARD ─────────────────────────────────────────────
+// ── RAPPEL DE COTISATION ──────────────────────────────────
+class RappelCotisation {
+  final int tontineId;
+  final String tontineNom;
+  final int parts;
+  final double montant;
+
+  RappelCotisation({required this.tontineId, required this.tontineNom,
+      required this.parts, required this.montant});
+
+  factory RappelCotisation.fromJson(Map<String, dynamic> j) => RappelCotisation(
+    tontineId: j['tontine_id'] ?? 0,
+    tontineNom: j['tontine_nom'] ?? '',
+    parts: j['parts'] ?? 1,
+    montant: double.tryParse('${j['montant'] ?? 0}') ?? 0,
+  );
+}
+
 class DashboardData {
   final int totalTontines;
-  final double totalCotisations;
-  final int prochainTour;
-  final double montantAttendu;
+  final int tontinesActives;
+  final int totalMembres;
+  final double totalCollecte;
   final int urgencesEnCours;
-  final List<Map<String, dynamic>> activiteRecente;
+  final double totalCotise;
+  final double montantDuMois;
+  final List<RappelCotisation> rappels;
+  final List<Map<String, dynamic>> activitesRecentes;
 
   DashboardData({
     required this.totalTontines,
-    required this.totalCotisations,
-    required this.prochainTour,
-    required this.montantAttendu,
+    required this.tontinesActives,
+    required this.totalMembres,
+    required this.totalCollecte,
     required this.urgencesEnCours,
-    required this.activiteRecente,
+    this.totalCotise = 0,
+    this.montantDuMois = 0,
+    this.rappels = const [],
+    required this.activitesRecentes,
   });
 
   factory DashboardData.fromJson(Map<String, dynamic> j) => DashboardData(
     totalTontines: j['total_tontines'] ?? 0,
-    totalCotisations:
-        double.tryParse('${j['total_cotisations'] ?? 0}') ?? 0,
-    prochainTour: j['prochain_tour'] ?? 0,
-    montantAttendu:
-        double.tryParse('${j['montant_attendu'] ?? 0}') ?? 0,
+    tontinesActives: j['tontines_actives'] ?? 0,
+    totalMembres: j['total_membres'] ?? 0,
+    totalCollecte: double.tryParse('${j['total_collecte'] ?? 0}') ?? 0,
     urgencesEnCours: j['urgences_en_cours'] ?? 0,
-    activiteRecente:
-        List<Map<String, dynamic>>.from(j['activite_recente'] ?? []),
+    totalCotise: double.tryParse('${j['total_cotise'] ?? 0}') ?? 0,
+    montantDuMois: double.tryParse('${j['montant_du_mois'] ?? 0}') ?? 0,
+    rappels: (j['rappels_cotisation'] as List? ?? [])
+        .map((r) => RappelCotisation.fromJson(r)).toList(),
+    activitesRecentes:
+        List<Map<String, dynamic>>.from(j['activites_recentes'] ?? []),
   );
 }

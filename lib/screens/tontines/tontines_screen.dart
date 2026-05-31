@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:dio/dio.dart';
 import 'package:intl/intl.dart';
+import 'package:share_plus/share_plus.dart';
 import '../../models/models.dart';
 import '../../services/api_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/widgets.dart';
 import '../cotisations/cotisations_screen.dart';
+import '../sutura/sutura_screen.dart';
 
 // ─────────────────────────────────────────────────────────
 //  LISTE DES TONTINES
@@ -205,8 +208,8 @@ class _TontineCard extends StatelessWidget {
                     '${fmt.format(tontine.montantCotisation)} FCFA',
                     AppColors.success),
                 const SizedBox(width: 10),
-                _Chip(Icons.people_outline,
-                    '${tontine.membresActifs}/${tontine.nombreMembres}',
+                _Chip(Icons.confirmation_number_outlined,
+                    '${tontine.partsActuelles}/${tontine.partsTotal} parts',
                     AppColors.primary),
                 const Spacer(),
                 if (tontine.estAdmin)
@@ -249,8 +252,9 @@ class TontineDetailScreen extends StatefulWidget {
 
 class _TontineDetailScreenState extends State<TontineDetailScreen> {
   final _api = ApiService();
-  List<Sutura> _suturas = [];
+  List<Tirage> _tirages = [];
   bool _loading = true;
+  bool _tirageEnCours = false;
 
   @override
   void initState() { super.initState(); _load(); }
@@ -258,13 +262,41 @@ class _TontineDetailScreenState extends State<TontineDetailScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final res = await _api.getSuturas(widget.tontine.id);
-      setState(() => _suturas = (res['data'] as List? ?? [])
-          .map((j) => Sutura.fromJson(j)).toList());
+      final res = await _api.getTirages(widget.tontine.id);
+      setState(() => _tirages = (res['data'] as List? ?? [])
+          .map((j) => Tirage.fromJson(j)).toList());
     } catch (_) {
     } finally {
       setState(() => _loading = false);
     }
+  }
+
+  Future<void> _lancerTirage() async {
+    setState(() => _tirageEnCours = true);
+    try {
+      final res = await _api.lancerTirage(widget.tontine.id);
+      if (mounted) {
+        final g = res['gagnant'];
+        final nom = g != null ? '${g['prenom'] ?? ''} ${g['nom'] ?? ''}'.trim() : '';
+        showSuccess(context, '🎰 Tour ${res['tour']} : $nom a gagné !');
+      }
+      await _load();
+    } on DioException catch (e) {
+      final msg = e.response?.data is Map ? e.response?.data['message'] as String? : null;
+      if (mounted) showError(context, msg ?? 'Tirage impossible');
+    } finally {
+      if (mounted) setState(() => _tirageEnCours = false);
+    }
+  }
+
+  // Ouvre la feuille de partage native avec le code + lien d'invitation
+  void _shareInvite(Tontine t) {
+    final msg = StringBuffer()
+      ..writeln('Rejoignez ma tontine « ${t.nom} » sur Tontine 🪙')
+      ..writeln('Code d\'invitation : ${t.code}');
+    if (t.inviteUrl != null) msg.writeln(t.inviteUrl);
+    Share.share(msg.toString().trim(),
+        subject: 'Invitation à rejoindre une tontine');
   }
 
   @override
@@ -342,9 +374,9 @@ class _TontineDetailScreenState extends State<TontineDetailScreen> {
                     childAspectRatio: 2.4,
                     children: [
                       _InfoCell('Cotisation', '${fmt.format(t.montantCotisation)} FCFA'),
-                      _InfoCell('Membres', '${t.membresActifs}/${t.nombreMembres}'),
+                      _InfoCell('Parts', '${t.partsActuelles}/${t.partsTotal}'),
                       _InfoCell('Fréquence', t.frequenceLabel),
-                      _InfoCell('Statut', t.statutLabel),
+                      _InfoCell('Membres', '${t.membresActifs}'),
                     ],
                   ),
                   const SizedBox(height: 20),
@@ -378,21 +410,68 @@ class _TontineDetailScreenState extends State<TontineDetailScreen> {
                         ),
                       ),
                     ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: () => _shareInvite(t),
+                        style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.primary,
+                            foregroundColor: Colors.white),
+                        icon: const Icon(Icons.share_rounded, size: 18),
+                        label: const Text('Inviter des membres'),
+                      ),
+                    ),
                     const SizedBox(height: 20),
                   ],
 
-                  // Tirages
-                  Text('Historique des tours',
+                  // Demandes d'urgence (Sutura)
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () => Navigator.push(context, MaterialPageRoute(
+                          builder: (_) => SuturaScreen(tontine: t))),
+                      icon: const Icon(Icons.health_and_safety_outlined, size: 18),
+                      label: const Text('Demandes d\'urgence (Sutura)'),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+
+                  // Tirage du mois (admin uniquement, tontine active)
+                  Text('Tirage mensuel',
                       style: soraStyle(size: 16, weight: FontWeight.w700)),
                   const SizedBox(height: 12),
+                  if (t.estAdmin && t.statut == 'active')
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: _tirageEnCours ? null : _lancerTirage,
+                        style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.accent,
+                            foregroundColor: Colors.white),
+                        icon: _tirageEnCours
+                            ? const SizedBox(width: 16, height: 16,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: Colors.white))
+                            : const Icon(Icons.casino_rounded, size: 18),
+                        label: const Text('Lancer le tirage du mois'),
+                      ),
+                    )
+                  else if (t.statut != 'active')
+                    Text('Le tirage sera disponible une fois la tontine active.',
+                        style: interStyle(size: 13, color: AppColors.textLight)),
+                  const SizedBox(height: 16),
 
+                  Text('Historique des tours',
+                      style: soraStyle(size: 15, weight: FontWeight.w700)),
+                  const SizedBox(height: 12),
                   if (_loading)
                     const FullScreenLoader()
-                  else if (_suturas.isEmpty)
+                  else if (_tirages.isEmpty)
                     const EmptyState(icon: Icons.swap_horiz_rounded,
                         message: 'Aucun tour effectué')
                   else
-                    ..._suturas.map((s) => _SuturaItem(sutura: s, fmt: fmt)),
+                    ..._tirages.map((tg) => _TirageItem(tirage: tg, fmt: fmt)),
 
                   const SizedBox(height: 100),
                 ],
@@ -458,10 +537,10 @@ class _InfoCell extends StatelessWidget {
   );
 }
 
-class _SuturaItem extends StatelessWidget {
-  final Sutura sutura;
+class _TirageItem extends StatelessWidget {
+  final Tirage tirage;
   final NumberFormat fmt;
-  const _SuturaItem({required this.sutura, required this.fmt});
+  const _TirageItem({required this.tirage, required this.fmt});
 
   @override
   Widget build(BuildContext context) => Container(
@@ -477,7 +556,7 @@ class _SuturaItem extends StatelessWidget {
         CircleAvatar(
           radius: 18,
           backgroundColor: AppColors.accent.withOpacity(0.15),
-          child: Text('${sutura.tour}',
+          child: Text('${tirage.tour}',
               style: soraStyle(size: 13, weight: FontWeight.w700,
                   color: AppColors.accent)),
         ),
@@ -486,16 +565,18 @@ class _SuturaItem extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(sutura.beneficiaire ?? 'Bénéficiaire',
+              Text(tirage.gagnant?.isNotEmpty == true
+                      ? tirage.gagnant!
+                      : 'Gagnant',
                   style: interStyle(size: 13, weight: FontWeight.w600,
                       color: AppColors.textDark)),
-              if (sutura.date != null)
-                Text(DateFormat('dd/MM/yyyy').format(sutura.date!),
+              if (tirage.date != null)
+                Text(DateFormat('dd/MM/yyyy').format(tirage.date!),
                     style: interStyle(size: 11)),
             ],
           ),
         ),
-        Text('${fmt.format(sutura.montantRecu)} FCFA',
+        Text('${fmt.format(tirage.montant)} FCFA',
             style: interStyle(size: 13, weight: FontWeight.w700,
                 color: AppColors.success)),
       ],
@@ -522,6 +603,7 @@ class _CreateSheetState extends State<_CreateSheet> {
   final _montCtrl   = TextEditingController();
   final _memCtrl    = TextEditingController();
   String _freq      = 'mensuel';
+  int _parts        = 1;
   bool _loading     = false;
 
   Future<void> _submit() async {
@@ -534,6 +616,7 @@ class _CreateSheetState extends State<_CreateSheet> {
         'montant_cotisation': _montCtrl.text.trim(),
         'nombre_membres': _memCtrl.text.trim(),
         'frequence': _freq,
+        'nombre_parts': _parts,
       });
       widget.onDone();
     } catch (_) {
@@ -565,7 +648,7 @@ class _CreateSheetState extends State<_CreateSheet> {
             ),
             const SizedBox(width: 12),
             Expanded(
-              child: AppField(controller: _memCtrl, label: 'Nbre membres',
+              child: AppField(controller: _memCtrl, label: 'Parts (tours)',
                   hint: '10', keyboardType: TextInputType.number,
                   validator: (v) => v!.isEmpty ? 'Requis' : null),
             ),
@@ -578,34 +661,42 @@ class _CreateSheetState extends State<_CreateSheet> {
                 color: AppColors.textDark)),
           ),
           const SizedBox(height: 8),
-          Row(
+          Wrap(
+            spacing: 8, runSpacing: 8,
             children: [
-              for (final f in ['hebdomadaire', 'mensuel', 'bimensuel'])
-                Expanded(
-                  child: GestureDetector(
-                    onTap: () => setState(() => _freq = f),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      margin: EdgeInsets.only(right: f != 'bimensuel' ? 8 : 0),
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                      decoration: BoxDecoration(
-                        color: _freq == f ? AppColors.primary : AppColors.surface,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                          color: _freq == f ? AppColors.primary : AppColors.border),
-                      ),
-                      child: Text(
-                        f == 'hebdomadaire' ? 'Hebdo'
-                            : f == 'bimensuel' ? '2x/mois' : 'Mensuel',
-                        textAlign: TextAlign.center,
-                        style: interStyle(size: 12, weight: FontWeight.w600,
-                            color: _freq == f ? Colors.white : AppColors.textGrey),
-                      ),
+              for (final f in const [
+                ['quotidien', 'Quotidien'],
+                ['hebdomadaire', 'Hebdo'],
+                ['bimensuel', '2×/mois'],
+                ['mensuel', 'Mensuel'],
+                ['bimestriel', 'Tous les 2 mois'],
+              ])
+                GestureDetector(
+                  onTap: () => setState(() => _freq = f[0]),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                    decoration: BoxDecoration(
+                      color: _freq == f[0] ? AppColors.primary : AppColors.surface,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: _freq == f[0] ? AppColors.primary : AppColors.border),
                     ),
+                    child: Text(f[1],
+                        style: interStyle(size: 12, weight: FontWeight.w600,
+                            color: _freq == f[0] ? Colors.white : AppColors.textGrey)),
                   ),
                 ),
             ],
           ),
+          const SizedBox(height: 16),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text('Mes parts', style: interStyle(size: 13,
+                weight: FontWeight.w600, color: AppColors.textDark)),
+          ),
+          const SizedBox(height: 8),
+          _PartsSelector(value: _parts, onChanged: (p) => setState(() => _parts = p)),
           const SizedBox(height: 24),
           PrimaryButton(label: 'Créer la tontine', onPressed: _submit, loading: _loading),
         ],
@@ -628,14 +719,22 @@ class _JoinSheet extends StatefulWidget {
 class _JoinSheetState extends State<_JoinSheet> {
   final _api     = ApiService();
   final _codeCtrl = TextEditingController();
+  int _parts     = 1;
   bool _loading  = false;
 
   Future<void> _join() async {
     if (_codeCtrl.text.trim().isEmpty) return;
     setState(() => _loading = true);
     try {
-      await _api.joinTontine(_codeCtrl.text.trim());
+      await _api.joinTontine(_codeCtrl.text.trim(), parts: _parts);
       widget.onDone();
+    } on DioException catch (e) {
+      final msg = e.response?.data is Map
+          ? e.response?.data['message'] as String?
+          : null;
+      if (mounted) {
+        showError(context, msg ?? 'Code invalide ou tontine introuvable');
+      }
     } catch (_) {
       if (mounted) showError(context, 'Code invalide ou tontine introuvable');
     } finally {
@@ -648,14 +747,64 @@ class _JoinSheetState extends State<_JoinSheet> {
     title: 'Rejoindre une tontine',
     subtitle: 'Entrez le code donné par l\'administrateur',
     child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         AppField(controller: _codeCtrl, label: 'Code d\'invitation',
-            hint: 'Ex: ABCD1234', prefixIcon: Icons.vpn_key_outlined),
+            hint: 'Ex: TN-ABCD1234', prefixIcon: Icons.vpn_key_outlined),
+        const SizedBox(height: 16),
+        Text('Nombre de parts', style: interStyle(size: 13,
+            weight: FontWeight.w600, color: AppColors.textDark)),
+        const SizedBox(height: 8),
+        _PartsSelector(value: _parts, onChanged: (p) => setState(() => _parts = p)),
+        const SizedBox(height: 6),
+        Text('2 ou 3 parts = vous cotisez plus et recevez la cagnotte autant de fois.',
+            style: interStyle(size: 12, color: AppColors.textLight)),
         const SizedBox(height: 24),
         PrimaryButton(label: 'Rejoindre', onPressed: _join, loading: _loading),
       ],
     ),
   );
+}
+
+// ─────────────────────────────────────────────────────────
+//  SÉLECTEUR DE PARTS (1 / 2 / 3)
+// ─────────────────────────────────────────────────────────
+class _PartsSelector extends StatelessWidget {
+  final int value;
+  final int max;
+  final ValueChanged<int> onChanged;
+  const _PartsSelector({required this.value, required this.onChanged, this.max = 3});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        for (int p = 1; p <= max; p++)
+          Expanded(
+            child: GestureDetector(
+              onTap: () => onChanged(p),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                margin: EdgeInsets.only(right: p != max ? 8 : 0),
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                decoration: BoxDecoration(
+                  color: value == p ? AppColors.primary : AppColors.surface,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                      color: value == p ? AppColors.primary : AppColors.border),
+                ),
+                child: Text(
+                  p == 1 ? '1 part' : '$p parts',
+                  textAlign: TextAlign.center,
+                  style: interStyle(size: 12, weight: FontWeight.w600,
+                      color: value == p ? Colors.white : AppColors.textGrey),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
 }
 
 // ─────────────────────────────────────────────────────────

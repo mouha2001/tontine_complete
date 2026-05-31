@@ -19,7 +19,7 @@ use Illuminate\Support\Facades\Route;
 Route::prefix('auth')->group(function () {
     Route::post('/send-otp',       [AuthController::class, 'sendOtp']);
     Route::post('/verify-otp',     [AuthController::class, 'verifyOtp']);
-    Route::post('/register-admin', [AuthController::class, 'registerAdmin']);
+   Route::post('/auth/register', [AuthController::class, 'registerAdmin']);
     Route::post('/join-invite',    [AuthController::class, 'joinViaInvite']);
 });
 
@@ -45,7 +45,8 @@ Route::middleware('auth:api')->group(function () {
     // Tontines
     Route::prefix('tontines')->group(function () {
         Route::get('/',                                  [TontineController::class, 'index']);
-        Route::post('/',                                 [TontineController::class, 'store']);         // admin
+        Route::post('/',                                 [TontineController::class, 'store']);         // tout user connecté
+        Route::post('/join',                             [TontineController::class, 'join']);          // rejoindre via code
         Route::get('/{id}',                              [TontineController::class, 'show']);
         Route::put('/{id}',                              [TontineController::class, 'update']);        // admin
         Route::delete('/{id}',                           [TontineController::class, 'destroy']);       // admin

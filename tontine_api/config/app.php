@@ -54,6 +54,9 @@ return [
 
     'url' => env('APP_URL', 'http://localhost'),
 
+    // URL du front (deep links d'invitation : {frontend_url}/invite/{code})
+    'frontend_url' => env('FRONTEND_URL', 'https://tontine.sn'),
+
     /*
     |--------------------------------------------------------------------------
     | Application Timezone

@@ -27,14 +27,14 @@ class StatCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: featured ? AppTheme.earth : AppTheme.white,
+        color: featured ? AppColors.earth : AppColors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: featured ? AppTheme.earth : AppTheme.creamDark,
+          color: featured ? AppColors.earth : AppColors.creamDark,
         ),
         boxShadow: [
           BoxShadow(
-            color: AppTheme.earth.withOpacity(0.06),
+            color: AppColors.earth.withOpacity(0.06),
             blurRadius: 20,
             offset: const Offset(0, 4),
           ),
@@ -47,7 +47,7 @@ class StatCard extends StatelessWidget {
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: featured ? AppTheme.gold.withOpacity(0.15) : iconBg,
+              color: featured ? AppColors.gold.withOpacity(0.15) : iconBg,
               borderRadius: BorderRadius.circular(12),
             ),
             child: Center(
@@ -60,7 +60,7 @@ class StatCard extends StatelessWidget {
             style: GoogleFonts.syne(
               fontSize: 22,
               fontWeight: FontWeight.w800,
-              color: featured ? AppTheme.gold : AppTheme.textDark,
+              color: featured ? AppColors.gold : AppColors.textDark,
               height: 1,
             ),
           ),
@@ -69,7 +69,7 @@ class StatCard extends StatelessWidget {
             label,
             style: GoogleFonts.dmSans(
               fontSize: 11,
-              color: featured ? Colors.white60 : AppTheme.textLight,
+              color: featured ? Colors.white60 : AppColors.textLight,
             ),
           ),
           const SizedBox(height: 8),
@@ -77,7 +77,7 @@ class StatCard extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(
               color: featured
-                  ? AppTheme.gold.withOpacity(0.15)
+                  ? AppColors.gold.withOpacity(0.15)
                   : isPositive
                       ? const Color(0xFFE8F5E8)
                       : const Color(0xFFFDEAEA),
@@ -89,7 +89,7 @@ class StatCard extends StatelessWidget {
                 fontSize: 11,
                 fontWeight: FontWeight.w500,
                 color: featured
-                    ? AppTheme.gold
+                    ? AppColors.gold
                     : isPositive
                         ? const Color(0xFF2D7D2D)
                         : const Color(0xFFC0392B),

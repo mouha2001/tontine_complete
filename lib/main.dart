@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import 'providers/auth_provider.dart';
+import 'services/api_service.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/dashboard/dashboard_screen.dart';
 import 'screens/tontines/tontines_screen.dart';
@@ -124,13 +125,38 @@ class _MainNav extends StatefulWidget {
 
 class _MainNavState extends State<_MainNav> {
   int _index = 0;
+  int _unread = 0;
+  final _api = ApiService();
 
-  static const _screens = [
+  final _screens = const [
     DashboardScreen(),
     TontinesScreen(),
     NotificationsScreen(),
     ProfileScreen(),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUnread();
+  }
+
+  Future<void> _loadUnread() async {
+    try {
+      final n = await _api.getUnreadCount();
+      if (mounted) setState(() => _unread = n);
+    } catch (_) {}
+  }
+
+  void _onTap(int i) {
+    setState(() => _index = i);
+    // rafraîchit le compteur (ex. après avoir consulté/lu les alertes)
+    _loadUnread();
+  }
+
+  Widget _alertIcon(IconData icon) => _unread > 0
+      ? Badge.count(count: _unread, child: Icon(icon))
+      : Icon(icon);
 
   @override
   Widget build(BuildContext context) {
@@ -145,24 +171,24 @@ class _MainNavState extends State<_MainNav> {
         ),
         child: BottomNavigationBar(
           currentIndex: _index,
-          onTap: (i) => setState(() => _index = i),
-          items: const [
-            BottomNavigationBarItem(
+          onTap: _onTap,
+          items: [
+            const BottomNavigationBarItem(
               icon: Icon(Icons.home_outlined),
               activeIcon: Icon(Icons.home_rounded),
               label: 'Accueil',
             ),
-            BottomNavigationBarItem(
+            const BottomNavigationBarItem(
               icon: Icon(Icons.savings_outlined),
               activeIcon: Icon(Icons.savings_rounded),
               label: 'Tontines',
             ),
             BottomNavigationBarItem(
-              icon: Icon(Icons.notifications_outlined),
-              activeIcon: Icon(Icons.notifications_rounded),
+              icon: _alertIcon(Icons.notifications_outlined),
+              activeIcon: _alertIcon(Icons.notifications_rounded),
               label: 'Alertes',
             ),
-            BottomNavigationBarItem(
+            const BottomNavigationBarItem(
               icon: Icon(Icons.person_outline),
               activeIcon: Icon(Icons.person_rounded),
               label: 'Profil',

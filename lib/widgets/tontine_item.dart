@@ -34,7 +34,7 @@ class TontineItem extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 14),
       decoration: const BoxDecoration(
         border: Border(
-          bottom: BorderSide(color: AppTheme.creamDark),
+          bottom: BorderSide(color: AppColors.creamDark),
         ),
       ),
       child: Column(
@@ -62,7 +62,7 @@ class TontineItem extends StatelessWidget {
                       style: GoogleFonts.dmSans(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
-                        color: AppTheme.textDark,
+                        color: AppColors.textDark,
                       ),
                     ),
                     const SizedBox(height: 2),
@@ -70,7 +70,7 @@ class TontineItem extends StatelessWidget {
                       members,
                       style: GoogleFonts.dmSans(
                         fontSize: 12,
-                        color: AppTheme.textLight,
+                        color: AppColors.textLight,
                       ),
                     ),
                   ],
@@ -84,14 +84,14 @@ class TontineItem extends StatelessWidget {
                     style: GoogleFonts.syne(
                       fontSize: 15,
                       fontWeight: FontWeight.w700,
-                      color: AppTheme.earth,
+                      color: AppColors.earth,
                     ),
                   ),
                   Text(
                     frequency,
                     style: GoogleFonts.dmSans(
                       fontSize: 11,
-                      color: AppTheme.textLight,
+                      color: AppColors.textLight,
                     ),
                   ),
                 ],
@@ -106,7 +106,7 @@ class TontineItem extends StatelessWidget {
                   borderRadius: BorderRadius.circular(3),
                   child: LinearProgressIndicator(
                     value: progress,
-                    backgroundColor: AppTheme.creamDark,
+                    backgroundColor: AppColors.creamDark,
                     valueColor: AlwaysStoppedAnimation<Color>(emojiColor),
                     minHeight: 6,
                   ),

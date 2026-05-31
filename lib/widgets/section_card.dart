@@ -18,9 +18,9 @@ class SectionCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: AppTheme.white,
+        color: AppColors.white,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: AppTheme.creamDark),
+        border: Border.all(color: AppColors.creamDark),
       ),
       child: Column(
         children: [
@@ -34,14 +34,14 @@ class SectionCard extends StatelessWidget {
                   style: GoogleFonts.syne(
                     fontSize: 15,
                     fontWeight: FontWeight.w700,
-                    color: AppTheme.textDark,
+                    color: AppColors.textDark,
                   ),
                 ),
                 if (action != null)
                   TextButton(
                     onPressed: () {},
                     style: TextButton.styleFrom(
-                      foregroundColor: AppTheme.gold,
+                      foregroundColor: AppColors.gold,
                       padding: EdgeInsets.zero,
                       minimumSize: Size.zero,
                     ),
@@ -56,7 +56,7 @@ class SectionCard extends StatelessWidget {
               ],
             ),
           ),
-          const Divider(height: 1, color: AppTheme.creamDark),
+          const Divider(height: 1, color: AppColors.creamDark),
           Padding(
             padding: const EdgeInsets.fromLTRB(22, 4, 22, 20),
             child: child,

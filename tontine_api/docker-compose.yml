@@ -1,0 +1,23 @@
+# Environnement de dev de l'API Tontine Digitale.
+# Lancer :  docker compose up --build
+# L'API écoute sur http://localhost:8000/api
+#
+# Configuration SQLite par défaut (cf .env.example : DB_CONNECTION=sqlite,
+# queue/cache/session = database). Aucun service externe requis.
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tontine_api
+    ports:
+      - "8000:8000"
+    volumes:
+      # Code monté en direct pour le hot-reload du serveur artisan
+      - .:/app
+      # vendor isolé dans un volume nommé (perf macOS + évite les conflits hôte)
+      - vendor:/app/vendor
+    restart: unless-stopped
+
+volumes:
+  vendor:

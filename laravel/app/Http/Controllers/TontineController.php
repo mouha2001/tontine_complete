@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Tontine;
 use App\Models\Tirage;
 use App\Services\NotificationService;
+use App\Services\TontineMembershipService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 
@@ -17,23 +18,16 @@ class TontineController extends Controller
     {
         $user = $request->user();
 
-        if ($user->isAdmin) {
-            // Admin voit les tontines qu'il a créées + celles où il est membre
-            $tontines = Tontine::with('admin')
-                ->where('admin_id', $user->id)
-                ->orWhereHas('membres', fn($q) => $q->where('user_id', $user->id))
-                ->orderByDesc('created_at')
-                ->get();
-        } else {
-            // Membre voit uniquement ses tontines
-            $tontines = $user->tontinesMembre()
-                ->with('admin')
-                ->orderByDesc('tontine_membres.created_at')
-                ->get();
-        }
+        // Rôle par tontine : chacun voit les tontines qu'il a créées (admin_id)
+        // ET celles qu'il a rejointes comme membre.
+        $tontines = Tontine::with('admin')
+            ->where('admin_id', $user->id)
+            ->orWhereHas('membres', fn($q) => $q->where('user_id', $user->id))
+            ->orderByDesc('created_at')
+            ->get();
 
         return response()->json([
-            'data' => $tontines->map(fn($t) => $t->toApiArray())->values(),
+            'data' => $tontines->map(fn($t) => $t->toApiArray(currentUserId: $user->id))->values(),
         ]);
     }
 
@@ -44,23 +38,32 @@ class TontineController extends Controller
         $this->authorizeAccess($request->user(), $tontine);
 
         return response()->json([
-            'data' => $tontine->toApiArray(withMembers: true),
+            'data' => $tontine->toApiArray(withMembers: true, currentUserId: $request->user()->id),
         ]);
     }
 
-    // ─── CRÉER (admin only) ───────────────────────────────────────────────────
+    // ─── CRÉER (tout utilisateur connecté → devient admin de SA tontine) ───────
     public function store(Request $request): JsonResponse
     {
-        $this->requireAdmin($request);
-
         $validated = $request->validate([
             'nom'                => 'required|string|max:100',
             'description'        => 'nullable|string|max:500',
             'montant_cotisation' => 'required|numeric|min:500',
-            'frequence'          => 'required|in:hebdomadaire,bimensuel,mensuel',
-            'nombre_membres'     => 'required|integer|min:2|max:50',
+            'frequence'          => 'required|in:quotidien,hebdomadaire,bimensuel,mensuel,bimestriel',
+            'nombre_membres'     => 'required|integer|min:2|max:50', // = nombre total de parts/tours
+            'nombre_parts'       => 'nullable|integer|min:1|max:3',  // parts prises par le créateur
             'date_debut'         => 'nullable|date|after_or_equal:today',
         ]);
+
+        $partsAdmin = $validated['nombre_parts'] ?? 1;
+        unset($validated['nombre_parts']);
+
+        // Le créateur ne peut pas prendre plus de parts que la capacité de la tontine
+        if ($partsAdmin > $validated['nombre_membres']) {
+            return response()->json([
+                'message' => 'Le nombre de parts dépasse la capacité de la tontine',
+            ], 422);
+        }
 
         $tontine = Tontine::create([
             ...$validated,
@@ -68,27 +71,50 @@ class TontineController extends Controller
             'statut'   => 'en_attente',
         ]);
 
-        // L'admin est automatiquement membre
-        $tontine->membres()->attach($request->user()->id);
+        // Le créateur est automatiquement membre (et admin via admin_id), avec ses parts
+        $tontine->membres()->attach($request->user()->id, ['nombre_parts' => $partsAdmin]);
 
         return response()->json([
             'message' => 'Tontine créée avec succès',
-            'data'    => $tontine->load('admin')->toApiArray(),
+            'data'    => $tontine->load('admin')->toApiArray(currentUserId: $request->user()->id),
         ], 201);
+    }
+
+    // ─── REJOINDRE VIA CODE (membre simple) ───────────────────────────────────
+    public function join(Request $request, TontineMembershipService $membership): JsonResponse
+    {
+        $validated = $request->validate([
+            'invite_code'  => 'required|string',
+            'nombre_parts' => 'nullable|integer|min:1|max:3',
+        ]);
+
+        $tontine = Tontine::where('invite_code', $validated['invite_code'])->first();
+        if (!$tontine) {
+            return response()->json(['message' => 'Code d\'invitation invalide'], 404);
+        }
+
+        $result = $membership->join($tontine, $request->user(), $validated['nombre_parts'] ?? 1);
+        if (!$result['ok']) {
+            return response()->json(['message' => $result['message']], $result['status']);
+        }
+
+        return response()->json([
+            'message' => $result['message'],
+            'data'    => $tontine->load('admin')->toApiArray(currentUserId: $request->user()->id),
+        ]);
     }
 
     // ─── MODIFIER (admin only) ────────────────────────────────────────────────
     public function update(Request $request, int $id): JsonResponse
     {
         $tontine = Tontine::findOrFail($id);
-        $this->requireAdmin($request);
         $this->requireOwner($request->user(), $tontine);
 
         $validated = $request->validate([
             'nom'                => 'sometimes|string|max:100',
             'description'        => 'nullable|string|max:500',
             'montant_cotisation' => 'sometimes|numeric|min:500',
-            'frequence'          => 'sometimes|in:hebdomadaire,bimensuel,mensuel',
+            'frequence'          => 'sometimes|in:quotidien,hebdomadaire,bimensuel,mensuel,bimestriel',
             'nombre_membres'     => 'sometimes|integer|min:2|max:50',
             'statut'             => 'sometimes|in:en_attente,active,terminee',
             'date_debut'         => 'nullable|date',
@@ -98,7 +124,7 @@ class TontineController extends Controller
 
         return response()->json([
             'message' => 'Tontine mise à jour',
-            'data'    => $tontine->load('admin')->toApiArray(),
+            'data'    => $tontine->load('admin')->toApiArray(currentUserId: $request->user()->id),
         ]);
     }
 
@@ -106,7 +132,6 @@ class TontineController extends Controller
     public function destroy(Request $request, int $id): JsonResponse
     {
         $tontine = Tontine::findOrFail($id);
-        $this->requireAdmin($request);
         $this->requireOwner($request->user(), $tontine);
 
         if ($tontine->statut === 'active') {
@@ -123,7 +148,6 @@ class TontineController extends Controller
     public function generateInvite(Request $request, int $id): JsonResponse
     {
         $tontine = Tontine::findOrFail($id);
-        $this->requireAdmin($request);
         $this->requireOwner($request->user(), $tontine);
 
         return response()->json([
@@ -139,11 +163,17 @@ class TontineController extends Controller
         $this->authorizeAccess($request->user(), $tontine);
 
         $membres = $tontine->membres()
-            ->withPivot(['ordre_tirage', 'a_recu_fonds', 'created_at'])
+            ->withPivot(['ordre_tirage', 'nombre_parts', 'parts_recues', 'created_at'])
             ->get();
 
         return response()->json([
-            'data' => $membres->map->toApiArray()->values(),
+            'data' => $membres->map(fn($m) => [
+                ...$m->toApiArray(),
+                'est_admin'    => $m->id === $tontine->admin_id,
+                'ordre_tirage' => $m->pivot->ordre_tirage,
+                'nombre_parts' => (int) $m->pivot->nombre_parts,
+                'parts_recues' => (int) $m->pivot->parts_recues,
+            ])->values(),
         ]);
     }
 
@@ -151,7 +181,6 @@ class TontineController extends Controller
     public function removeMembre(Request $request, int $id, int $userId): JsonResponse
     {
         $tontine = Tontine::findOrFail($id);
-        $this->requireAdmin($request);
         $this->requireOwner($request->user(), $tontine);
 
         if ($userId === $tontine->admin_id) {
@@ -167,49 +196,64 @@ class TontineController extends Controller
     public function lancerTirage(Request $request, int $id): JsonResponse
     {
         $tontine = Tontine::with('membres')->findOrFail($id);
-        $this->requireAdmin($request);
         $this->requireOwner($request->user(), $tontine);
 
         if ($tontine->statut !== 'active') {
             return response()->json(['message' => 'La tontine doit être active pour lancer le tirage'], 422);
         }
 
-        // Membres n'ayant pas encore reçu les fonds
+        // Tirage mensuel : un seul tirage par mois calendaire
+        $dejaCeMois = Tirage::where('tontine_id', $tontine->id)
+            ->whereYear('created_at', now()->year)
+            ->whereMonth('created_at', now()->month)
+            ->exists();
+        if ($dejaCeMois) {
+            return response()->json(['message' => 'Un tirage a déjà été effectué ce mois-ci'], 422);
+        }
+
+        // Parts n'ayant pas encore reçu les fonds (un membre à N parts reste
+        // éligible tant qu'il n'a pas reçu N fois)
         $eligibles = $tontine->membres()
-            ->wherePivot('a_recu_fonds', false)
+            ->whereColumn('tontine_membres.parts_recues', '<', 'tontine_membres.nombre_parts')
             ->get();
 
         if ($eligibles->isEmpty()) {
-            return response()->json(['message' => 'Tous les membres ont déjà reçu les fonds'], 422);
+            return response()->json(['message' => 'Toutes les parts ont déjà reçu les fonds'], 422);
         }
 
-        // Tirage aléatoire cryptographiquement sûr
+        // Tirage aléatoire parmi les parts restantes
         $gagnant = $eligibles->random();
 
-        // Enregistrer le tirage
+        // Le pot d'un tour = cotisation × total des parts de la tontine
         $tirage = Tirage::create([
             'tontine_id'      => $tontine->id,
             'gagnant_id'      => $gagnant->id,
             'tour'            => $tontine->tour_actuel + 1,
-            'montant_attribue' => $tontine->montant_cotisation * $tontine->membres_actuels,
+            'montant_attribue' => $tontine->montant_cotisation * $tontine->parts_actuelles,
         ]);
 
-        // Marquer le gagnant
-        $tontine->membres()->updateExistingPivot($gagnant->id, ['a_recu_fonds' => true]);
+        // Incrémenter le nombre de parts reçues par le gagnant
+        $tontine->membres()->updateExistingPivot($gagnant->id, [
+            'parts_recues' => $gagnant->pivot->parts_recues + 1,
+        ]);
         $tontine->increment('tour_actuel');
 
-        // Vérifier si tous ont reçu → terminer
-        if ($tontine->membres()->wherePivot('a_recu_fonds', false)->count() === 0) {
+        // Toutes les parts servies → terminer
+        $reste = $tontine->membres()
+            ->whereColumn('tontine_membres.parts_recues', '<', 'tontine_membres.nombre_parts')
+            ->count();
+        if ($reste === 0) {
             $tontine->update(['statut' => 'terminee']);
         }
 
         // Notifier tous les membres
-        $tontine->membres->each(function ($membre) use ($gagnant, $tontine, $tirage) {
+        $nomGagnant = trim("{$gagnant->prenom} {$gagnant->nom}");
+        $tontine->membres->each(function ($membre) use ($nomGagnant, $tontine, $tirage) {
             $this->notifService->send(
                 $membre->id,
                 'tirage_resultat',
                 '🎰 Résultat du tirage !',
-                "{$gagnant->nom} a gagné le tour {$tirage->tour} de la tontine {$tontine->nom}",
+                "{$nomGagnant} a gagné le tour {$tirage->tour} de la tontine {$tontine->nom}",
                 ['tontine_id' => $tontine->id, 'tirage_id' => $tirage->id],
             );
         });
@@ -246,11 +290,6 @@ class TontineController extends Controller
     }
 
     // ─── GUARDS ───────────────────────────────────────────────────────────────
-    private function requireAdmin(Request $request): void
-    {
-        abort_if(!$request->user()->isAdmin, 403, 'Accès réservé aux administrateurs');
-    }
-
     private function requireOwner($user, Tontine $tontine): void
     {
         abort_if($tontine->admin_id !== $user->id, 403, 'Vous n\'êtes pas propriétaire de cette tontine');
