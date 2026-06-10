@@ -126,6 +126,7 @@ class _MainNav extends StatefulWidget {
 class _MainNavState extends State<_MainNav> {
   int _index = 0;
   int _unread = 0;
+  DateTime? _lastBack;
   final _api = ApiService();
 
   final _screens = const [
@@ -150,6 +151,7 @@ class _MainNavState extends State<_MainNav> {
 
   void _onTap(int i) {
     setState(() => _index = i);
+    _lastBack = null; // le double-tap n'exige que deux « retour » consécutifs
     // rafraîchit le compteur (ex. après avoir consulté/lu les alertes)
     _loadUnread();
   }
@@ -158,14 +160,39 @@ class _MainNavState extends State<_MainNav> {
       ? Badge.count(count: _unread, child: Icon(icon))
       : Icon(icon);
 
+  void _handleBack() {
+    // Sur un onglet autre que l'Accueil → revenir à l'Accueil
+    if (_index != 0) {
+      setState(() => _index = 0);
+      _lastBack = null;
+      return;
+    }
+    // Sur l'Accueil → double-tap pour quitter
+    final now = DateTime.now();
+    if (_lastBack == null || now.difference(_lastBack!) > const Duration(seconds: 2)) {
+      _lastBack = now;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Appuyez encore pour quitter'),
+        duration: Duration(seconds: 2),
+      ));
+      return;
+    }
+    SystemNavigator.pop();
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: IndexedStack(
-        index: _index,
-        children: _screens,
-      ),
-      bottomNavigationBar: Container(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) _handleBack();
+      },
+      child: Scaffold(
+        body: IndexedStack(
+          index: _index,
+          children: _screens,
+        ),
+        bottomNavigationBar: Container(
         decoration: const BoxDecoration(
           border: Border(top: BorderSide(color: AppColors.border)),
         ),
@@ -194,6 +221,7 @@ class _MainNavState extends State<_MainNav> {
               label: 'Profil',
             ),
           ],
+        ),
         ),
       ),
     );

@@ -7,6 +7,7 @@ use App\Models\Tontine;
 use App\Services\OtpService;
 use App\Services\NotificationService;
 use App\Services\TontineMembershipService;
+use App\Support\Phone;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -35,7 +36,14 @@ class AuthController extends Controller
         );
 
         $otp = $user->generateOtp();
-        $this->otpService->send($phone, $otp);
+
+        try {
+            $this->otpService->send($phone, $otp);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'message' => "Échec de l'envoi du SMS, veuillez réessayer",
+            ], 502);
+        }
 
         return response()->json([
             'message' => 'Code OTP envoyé avec succès',
@@ -226,12 +234,6 @@ class AuthController extends Controller
     // ─── HELPER ───────────────────────────────────────────────────────────────
     private function normalizePhone(string $phone): string
     {
-        // Retirer espaces et préfixe +221
-        $phone = preg_replace('/\s+/', '', $phone);
-        $phone = ltrim($phone, '+');
-        if (str_starts_with($phone, '221')) {
-            $phone = substr($phone, 3);
-        }
-        return $phone;
+        return Phone::normalize($phone);
     }
 }

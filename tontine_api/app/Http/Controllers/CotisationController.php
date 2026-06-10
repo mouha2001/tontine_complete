@@ -5,17 +5,13 @@ namespace App\Http\Controllers;
 use App\Models\Cotisation;
 use App\Models\Tontine;
 use App\Services\NotificationService;
-use App\Services\PaiementService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Str;
 
 class CotisationController extends Controller
 {
-    public function __construct(
-        private PaiementService $paiementService,
-        private NotificationService $notifService,
-    ) {}
+    public function __construct(private NotificationService $notifService) {}
 
     // ─── LISTE DES COTISATIONS ────────────────────────────────────────────────
     public function index(Request $request): JsonResponse
@@ -27,18 +23,15 @@ class CotisationController extends Controller
             $tontineId = $request->integer('tontine_id');
             $tontine   = Tontine::findOrFail($tontineId);
 
-            // Admin peut voir toutes les cotisations de sa tontine
-            if ($user->isAdmin && $tontine->admin_id === $user->id) {
+            // L'admin (propriétaire) voit toutes les cotisations de SA tontine ;
+            // un membre ne voit que les siennes.
+            if ($tontine->admin_id === $user->id) {
                 $query->where('tontine_id', $tontineId);
             } else {
-                // Membre : uniquement les siennes
-                $query->where('tontine_id', $tontineId)
-                      ->where('user_id', $user->id);
+                $query->where('tontine_id', $tontineId)->where('user_id', $user->id);
             }
         } else {
-            if (!$user->isAdmin) {
-                $query->where('user_id', $user->id);
-            }
+            $query->where('user_id', $user->id);
         }
 
         $cotisations = $query->orderByDesc('created_at')->get();
@@ -48,143 +41,121 @@ class CotisationController extends Controller
         ]);
     }
 
-    // ─── INITIER UN PAIEMENT ──────────────────────────────────────────────────
+    // ─── ENREGISTRER UNE COTISATION ───────────────────────────────────────────
+    // Le paiement se fait HORS de l'app (Wave/OM/Free/espèces). Le membre déclare
+    // sa cotisation ; elle reste "en_attente" jusqu'à validation par l'admin.
     public function initierPaiement(Request $request): JsonResponse
     {
         $request->validate([
             'tontine_id'       => 'required|integer|exists:tontines,id',
-            'methode_paiement' => 'required|in:wave,orange_money',
+            'methode_paiement' => 'required|in:wave,orange_money,free_money,cash',
+            'reference'        => 'nullable|string|max:100',
         ]);
 
         $user    = $request->user();
         $tontine = Tontine::findOrFail($request->tontine_id);
 
-        // Vérifier que l'utilisateur est membre et récupérer ses parts
+        // Membre + ses parts (montant calculé côté serveur, jamais depuis le client)
         $parts = $tontine->membres()->where('user_id', $user->id)->value('tontine_membres.nombre_parts');
         if ($parts === null) {
             return response()->json(['message' => 'Vous n\'êtes pas membre de cette tontine'], 403);
         }
 
-        // Montant calculé côté serveur : cotisation × nombre de parts du membre
         $montant = $tontine->montant_cotisation * (int) $parts;
 
-        $reference = 'TON-' . strtoupper(Str::random(12));
+        // Anti-doublon : une seule cotisation en attente par membre et par tontine
+        if (Cotisation::where('tontine_id', $tontine->id)
+                ->where('user_id', $user->id)
+                ->where('statut', 'en_attente')->exists()) {
+            return response()->json([
+                'message' => 'Vous avez déjà une cotisation en attente de validation',
+            ], 422);
+        }
 
-        // Créer la cotisation en attente
         $cotisation = Cotisation::create([
             'tontine_id'       => $tontine->id,
             'user_id'          => $user->id,
             'montant'          => $montant,
             'statut'           => 'en_attente',
             'methode_paiement' => $request->methode_paiement,
-            'reference'        => $reference,
+            'reference'        => $request->reference ?: 'COT-' . strtoupper(Str::random(10)),
         ]);
 
-        // Appeler l'API de paiement
-        $result = $this->paiementService->initier(
-            methode: $request->methode_paiement,
-            montant: $montant,
-            reference: $reference,
-            telephone: $user->telephone,
-            description: "Cotisation tontine {$tontine->nom}",
-            callbackUrl: config('app.url') . '/api/cotisations/webhook',
+        // Notifier l'admin pour validation
+        $this->notifService->send(
+            $tontine->admin_id,
+            'cotisation_a_valider',
+            '💳 Cotisation à valider',
+            trim("{$user->prenom} {$user->nom}") . " a déclaré une cotisation de {$montant} FCFA ({$tontine->nom})",
+            ['tontine_id' => $tontine->id, 'cotisation_id' => $cotisation->id],
         );
 
         return response()->json([
-            'reference'   => $reference,
-            'payment_url' => $result['payment_url'],
-            'expires_at'  => $result['expires_at'] ?? now()->addMinutes(15)->toISOString(),
+            'message' => 'Cotisation enregistrée, en attente de validation',
+            'data'    => $this->formatCotisation($cotisation->load(['user', 'tontine'])),
+        ], 201);
+    }
+
+    // ─── CONFIRMER UNE COTISATION (admin de la tontine) ───────────────────────
+    public function confirmer(Request $request, int $id): JsonResponse
+    {
+        $cotisation = Cotisation::with(['user', 'tontine'])->findOrFail($id);
+        $this->requireOwner($request->user(), $cotisation->tontine);
+
+        if ($cotisation->statut !== 'en_attente') {
+            return response()->json(['message' => 'Seule une cotisation en attente peut être confirmée'], 422);
+        }
+
+        $cotisation->update([
+            'statut'       => 'confirme',
+            'paye_le'      => now(),
+            'confirme_par' => $request->user()->id,
         ]);
-    }
 
-    // ─── VÉRIFIER STATUT PAIEMENT ─────────────────────────────────────────────
-    public function verifierPaiement(Request $request): JsonResponse
-    {
-        $request->validate(['reference' => 'required|string']);
-
-        $cotisation = Cotisation::with(['user', 'tontine'])
-            ->where('reference', $request->reference)
-            ->where('user_id', $request->user()->id)
-            ->firstOrFail();
-
-        // Vérifier avec l'API externe si toujours en attente
-        if ($cotisation->statut === 'en_attente') {
-            $status = $this->paiementService->verifier(
-                $cotisation->methode_paiement,
-                $cotisation->reference,
-            );
-
-            if ($status === 'confirme') {
-                $cotisation->update([
-                    'statut'  => 'confirme',
-                    'paye_le' => now(),
-                ]);
-                $this->onPaiementConfirme($cotisation);
-            } elseif ($status === 'echoue') {
-                $cotisation->update(['statut' => 'echoue']);
-            }
-        }
-
-        return response()->json([
-            'data' => $this->formatCotisation($cotisation),
-        ]);
-    }
-
-    // ─── WEBHOOK (appelé par Wave / Orange Money) ─────────────────────────────
-    public function webhook(Request $request): JsonResponse
-    {
-        // Vérifier la signature webhook
-        if (!$this->paiementService->verifyWebhookSignature($request)) {
-            return response()->json(['error' => 'Signature invalide'], 401);
-        }
-
-        $reference = $request->input('reference') ?? $request->input('client_reference');
-        $statut    = $request->input('status');
-
-        $cotisation = Cotisation::with(['user', 'tontine'])
-            ->where('reference', $reference)
-            ->first();
-
-        if (!$cotisation) {
-            return response()->json(['error' => 'Cotisation non trouvée'], 404);
-        }
-
-        if ($statut === 'SUCCESS' && $cotisation->statut !== 'confirme') {
-            $cotisation->update([
-                'statut'       => 'confirme',
-                'paye_le'      => now(),
-                'webhook_data' => $request->all(),
-            ]);
-            $this->onPaiementConfirme($cotisation);
-        } elseif (in_array($statut, ['FAILED', 'CANCELLED', 'EXPIRED'])) {
-            $cotisation->update(['statut' => 'echoue', 'webhook_data' => $request->all()]);
-        }
-
-        return response()->json(['status' => 'ok']);
-    }
-
-    // ─── ON PAIEMENT CONFIRMÉ ─────────────────────────────────────────────────
-    private function onPaiementConfirme(Cotisation $cotisation): void
-    {
-        $tontine = $cotisation->tontine;
-
-        // Notifier le membre
         $this->notifService->send(
             $cotisation->user_id,
             'cotisation_confirmee',
             '✅ Cotisation confirmée',
-            "Votre paiement de {$cotisation->montant} FCFA pour {$tontine->nom} a été confirmé",
-            ['tontine_id' => $tontine->id, 'cotisation_id' => $cotisation->id],
+            "Votre cotisation de {$cotisation->montant} FCFA pour {$cotisation->tontine->nom} a été confirmée",
+            ['tontine_id' => $cotisation->tontine_id, 'cotisation_id' => $cotisation->id],
         );
 
-        // Notifier l'admin
+        return response()->json([
+            'message' => 'Cotisation confirmée',
+            'data'    => $this->formatCotisation($cotisation),
+        ]);
+    }
+
+    // ─── REJETER UNE COTISATION (admin de la tontine) ─────────────────────────
+    public function rejeter(Request $request, int $id): JsonResponse
+    {
+        $cotisation = Cotisation::with(['user', 'tontine'])->findOrFail($id);
+        $this->requireOwner($request->user(), $cotisation->tontine);
+
+        if ($cotisation->statut !== 'en_attente') {
+            return response()->json(['message' => 'Seule une cotisation en attente peut être rejetée'], 422);
+        }
+
+        $cotisation->update(['statut' => 'echoue']);
+
         $this->notifService->send(
-            $tontine->admin_id,
-            'cotisation_recu',
-            '💳 Cotisation reçue',
-            "{$cotisation->user->nom} a cotisé {$cotisation->montant} FCFA pour {$tontine->nom}",
-            ['tontine_id' => $tontine->id, 'cotisation_id' => $cotisation->id],
+            $cotisation->user_id,
+            'cotisation_rejetee',
+            '❌ Cotisation rejetée',
+            "Votre cotisation de {$cotisation->montant} FCFA pour {$cotisation->tontine->nom} a été rejetée",
+            ['tontine_id' => $cotisation->tontine_id, 'cotisation_id' => $cotisation->id],
         );
+
+        return response()->json([
+            'message' => 'Cotisation rejetée',
+            'data'    => $this->formatCotisation($cotisation),
+        ]);
+    }
+
+    // ─── GUARD ────────────────────────────────────────────────────────────────
+    private function requireOwner($user, Tontine $tontine): void
+    {
+        abort_if($tontine->admin_id !== $user->id, 403, 'Action réservée à l\'administrateur de la tontine');
     }
 
     private function formatCotisation(Cotisation $c): array
@@ -197,10 +168,9 @@ class CotisationController extends Controller
             'statut'           => $c->statut,
             'methode_paiement' => $c->methode_paiement,
             'reference'        => $c->reference,
-            'receipt_url'      => $c->receipt_url,
             'paye_le'          => $c->paye_le?->toISOString(),
             'created_at'       => $c->created_at->toISOString(),
-            'user'             => $c->user ? ['nom' => $c->user->nom] : null,
+            'user'             => $c->user ? ['nom' => $c->user->nom, 'prenom' => $c->user->prenom] : null,
             'tontine'          => $c->tontine ? ['nom' => $c->tontine->nom] : null,
         ];
     }

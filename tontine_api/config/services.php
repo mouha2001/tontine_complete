@@ -35,4 +35,11 @@ return [
         ],
     ],
 
+    // SMS / OTP — DExchange SMS (https://docs.dexchange-sms.com)
+    'dexchange' => [
+        'url'       => env('DEXCHANGE_SMS_URL', 'https://api-v2.dexchange-sms.com/api/v1'),
+        'key'       => env('DEXCHANGE_SMS_KEY'),
+        'signature' => env('DEXCHANGE_SMS_SIGNATURE', 'DEXCHANGE'),
+    ],
+
 ];

@@ -68,8 +68,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final res = await _api.getTontineById(r.tontineId);
       if (!mounted) return;
       final tontine = Tontine.fromJson(res['data']);
-      await Navigator.push(context, MaterialPageRoute(
-          builder: (_) => CotisationsScreen(tontine: tontine, openPay: true)));
+      await Navigator.push(context,
+          appRoute(CotisationsScreen(tontine: tontine, openPay: true)));
       _load();
     } catch (_) {
       if (mounted) showError(context, 'Impossible d\'ouvrir le paiement');
@@ -222,8 +222,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
             // ================= BODY =================
             if (_loading)
-              const SliverFillRemaining(
-                child: Center(child: CircularProgressIndicator()),
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    children: [
+                      Row(children: const [
+                        Expanded(child: SkeletonBox(height: 118, radius: 16)),
+                        SizedBox(width: 10),
+                        Expanded(child: SkeletonBox(height: 118, radius: 16)),
+                      ]),
+                      const SizedBox(height: 10),
+                      Row(children: const [
+                        Expanded(child: SkeletonBox(height: 118, radius: 16)),
+                        SizedBox(width: 10),
+                        Expanded(child: SkeletonBox(height: 118, radius: 16)),
+                      ]),
+                      const SizedBox(height: 24),
+                      ...List.generate(4, (_) => const SkeletonCard(height: 56)),
+                    ],
+                  ),
+                ),
               )
             else if (_error != null)
               SliverFillRemaining(
@@ -350,33 +369,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _statCard(
-      String title, String value, IconData icon, Color color) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: const [
-          BoxShadow(
-            blurRadius: 6,
-            color: Colors.black12,
-          )
-        ],
-      ),
-      child: Column(
-        children: [
-          Icon(icon, color: color),
-          const SizedBox(height: 8),
-          Text(value,
-              style:
-                  const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-          Text(title,
-              style: const TextStyle(color: Colors.grey, fontSize: 12)),
-        ],
-      ),
-    );
-  }
+  // Réutilise la carte stat partagée pour un rendu cohérent dans toute l'app
+  Widget _statCard(String title, String value, IconData icon, Color color) =>
+      StatCard(label: title, value: value, icon: icon, color: color);
 
   Widget _activityCard(Map<String, dynamic> a) {
     return ListTile(

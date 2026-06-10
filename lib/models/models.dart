@@ -131,24 +131,24 @@ class Cotisation {
 
   Color get color {
     switch (statut) {
-      case 'payee': return AppColors.success;
-      case 'retard': return AppColors.error;
+      case 'confirme': return AppColors.success;
+      case 'echoue': return AppColors.error;
       default: return AppColors.warning;
     }
   }
 
   IconData get icon {
     switch (statut) {
-      case 'payee': return Icons.check_circle_rounded;
-      case 'retard': return Icons.error_rounded;
+      case 'confirme': return Icons.check_circle_rounded;
+      case 'echoue': return Icons.cancel_rounded;
       default: return Icons.schedule_rounded;
     }
   }
 
   String get statutLabel {
     switch (statut) {
-      case 'payee': return 'Payée';
-      case 'retard': return 'En retard';
+      case 'confirme': return 'Confirmée';
+      case 'echoue': return 'Rejetée';
       default: return 'En attente';
     }
   }
@@ -190,13 +190,15 @@ class Sutura {
   final bool? monVote;         // null = pas encore voté
   final bool estMien;          // visible uniquement par le demandeur (anonymat)
   final bool peutVoter;
+  final DateTime? voteExpiresAt;
   final DateTime? createdAt;
 
   Sutura({
     required this.id, required this.tontineId, required this.montantDemande,
     required this.motif, required this.statut, this.votesOui = 0,
     this.votesNon = 0, this.totalVotants = 0, this.totalEligibles = 0,
-    this.monVote, this.estMien = false, this.peutVoter = false, this.createdAt,
+    this.monVote, this.estMien = false, this.peutVoter = false,
+    this.voteExpiresAt, this.createdAt,
   });
 
   factory Sutura.fromJson(Map<String, dynamic> j) => Sutura(
@@ -212,8 +214,21 @@ class Sutura {
     monVote: j['mon_vote'],
     estMien: j['est_mien'] == true,
     peutVoter: j['peut_voter'] == true,
+    voteExpiresAt: j['vote_expires_at'] != null
+        ? DateTime.tryParse(j['vote_expires_at'])?.toLocal()
+        : null,
     createdAt: j['created_at'] != null ? DateTime.tryParse(j['created_at']) : null,
   );
+
+  // Temps restant avant la fin du vote (peut être négatif si expiré)
+  Duration get tempsRestant => voteExpiresAt == null
+      ? Duration.zero
+      : voteExpiresAt!.difference(DateTime.now());
+
+  bool get expire => voteExpiresAt != null && tempsRestant.isNegative;
+
+  // Vote possible côté UI : autorisé par le serveur ET délai non écoulé
+  bool get votable => peutVoter && !expire;
 
   String get statutLabel {
     switch (statut) {

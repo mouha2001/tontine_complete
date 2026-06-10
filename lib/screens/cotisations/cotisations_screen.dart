@@ -47,9 +47,9 @@ class _CotisationsScreenState extends State<CotisationsScreen>
     }
   }
 
-  List<Cotisation> get _payees    => _cotisations.where((c) => c.statut == 'payee').toList();
+  List<Cotisation> get _payees    => _cotisations.where((c) => c.statut == 'confirme').toList();
   List<Cotisation> get _attente   => _cotisations.where((c) => c.statut == 'en_attente').toList();
-  List<Cotisation> get _retard    => _cotisations.where((c) => c.statut == 'retard').toList();
+  List<Cotisation> get _retard    => _cotisations.where((c) => c.statut == 'echoue').toList();
 
   void _showPay() => showModalBottomSheet(
     context: context,
@@ -60,6 +60,26 @@ class _CotisationsScreenState extends State<CotisationsScreen>
       onDone: () { Navigator.pop(context); _load(); },
     ),
   );
+
+  Future<void> _confirm(Cotisation c) async {
+    try {
+      await _api.confirmerCotisation(c.id);
+      if (mounted) showSuccess(context, 'Cotisation confirmée');
+      _load();
+    } catch (_) {
+      if (mounted) showError(context, 'Action impossible');
+    }
+  }
+
+  Future<void> _reject(Cotisation c) async {
+    try {
+      await _api.rejeterCotisation(c.id);
+      if (mounted) showSuccess(context, 'Cotisation rejetée');
+      _load();
+    } catch (_) {
+      if (mounted) showError(context, 'Action impossible');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -76,9 +96,9 @@ class _CotisationsScreenState extends State<CotisationsScreen>
           unselectedLabelColor: AppColors.textLight,
           indicatorColor: AppColors.accent,
           tabs: [
-            Tab(text: 'Payées (${_payees.length})'),
-            Tab(text: 'Attente (${_attente.length})'),
-            Tab(text: 'Retard (${_retard.length})'),
+            Tab(text: 'Confirmées (${_payees.length})'),
+            Tab(text: 'En attente (${_attente.length})'),
+            Tab(text: 'Rejetées (${_retard.length})'),
           ],
         ),
       ),
@@ -128,11 +148,13 @@ class _CotisationsScreenState extends State<CotisationsScreen>
                     controller: _tab,
                     children: [
                       _CotList(cotisations: _payees,
-                          empty: 'Aucune cotisation payée'),
+                          empty: 'Aucune cotisation confirmée'),
                       _CotList(cotisations: _attente,
-                          empty: 'Aucune cotisation en attente'),
+                          empty: 'Aucune cotisation en attente',
+                          isAdmin: widget.tontine.estAdmin,
+                          onConfirm: _confirm, onReject: _reject),
                       _CotList(cotisations: _retard,
-                          empty: 'Aucun retard 🎉'),
+                          empty: 'Aucune cotisation rejetée'),
                     ],
                   ),
           ),
@@ -158,7 +180,11 @@ class _CotisationsScreenState extends State<CotisationsScreen>
 class _CotList extends StatelessWidget {
   final List<Cotisation> cotisations;
   final String empty;
-  const _CotList({required this.cotisations, required this.empty});
+  final bool isAdmin;
+  final Future<void> Function(Cotisation)? onConfirm;
+  final Future<void> Function(Cotisation)? onReject;
+  const _CotList({required this.cotisations, required this.empty,
+      this.isAdmin = false, this.onConfirm, this.onReject});
 
   @override
   Widget build(BuildContext context) {
@@ -171,6 +197,8 @@ class _CotList extends StatelessWidget {
       itemCount: cotisations.length,
       itemBuilder: (_, i) {
         final c = cotisations[i];
+        final showActions = isAdmin && c.statut == 'en_attente'
+            && onConfirm != null && onReject != null;
         return Container(
           margin: const EdgeInsets.only(bottom: 8),
           padding: const EdgeInsets.all(14),
@@ -179,34 +207,68 @@ class _CotList extends StatelessWidget {
             borderRadius: BorderRadius.circular(14),
             border: Border.all(color: AppColors.border),
           ),
-          child: Row(
+          child: Column(
             children: [
-              Icon(c.icon, color: c.color, size: 24),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(c.userName ?? 'Membre',
-                        style: interStyle(size: 13, weight: FontWeight.w600,
-                            color: AppColors.textDark)),
-                    if (c.periode != null)
-                      Text(c.periode!, style: interStyle(size: 12)),
-                    if (c.datePaiement != null)
-                      Text(DateFormat('dd/MM/yyyy').format(c.datePaiement!),
-                          style: interStyle(size: 11)),
-                  ],
-                ),
-              ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
+              Row(
                 children: [
-                  Text('${fmt.format(c.montant)} FCFA',
-                      style: interStyle(size: 13, weight: FontWeight.w700,
-                          color: c.color)),
-                  StatusBadge(label: c.statutLabel, color: c.color),
+                  Icon(c.icon, color: c.color, size: 24),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(c.userName ?? 'Membre',
+                            style: interStyle(size: 13, weight: FontWeight.w600,
+                                color: AppColors.textDark)),
+                        if (c.periode != null)
+                          Text(c.periode!, style: interStyle(size: 12)),
+                        if (c.datePaiement != null)
+                          Text(DateFormat('dd/MM/yyyy').format(c.datePaiement!),
+                              style: interStyle(size: 11)),
+                      ],
+                    ),
+                  ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text('${fmt.format(c.montant)} FCFA',
+                          style: interStyle(size: 13, weight: FontWeight.w700,
+                              color: c.color)),
+                      StatusBadge(label: c.statutLabel, color: c.color),
+                    ],
+                  ),
                 ],
               ),
+              if (showActions) ...[
+                const SizedBox(height: 10),
+                const Divider(height: 1, color: AppColors.border),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => onReject!(c),
+                        style: OutlinedButton.styleFrom(
+                            foregroundColor: AppColors.error,
+                            side: const BorderSide(color: AppColors.error)),
+                        icon: const Icon(Icons.close_rounded, size: 16),
+                        label: const Text('Rejeter'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: () => onConfirm!(c),
+                        style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.success,
+                            foregroundColor: Colors.white),
+                        icon: const Icon(Icons.check_rounded, size: 16),
+                        label: const Text('Confirmer'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ],
           ),
         );
@@ -251,7 +313,8 @@ class _PaySheetState extends State<_PaySheet> {
         'methode_paiement': _methode,
         'reference': _refCtrl.text.trim(),
       });
-      showSuccess(context, 'Paiement enregistré !');
+      if (!mounted) return;
+      showSuccess(context, 'Cotisation enregistrée, en attente de validation');
       widget.onDone();
     } catch (_) {
       if (mounted) showError(context, 'Erreur lors du paiement');

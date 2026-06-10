@@ -268,6 +268,73 @@ class LabelDivider extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────
+//  TRANSITION DE PAGE FLUIDE (fade + léger slide)
+// ─────────────────────────────────────────────────────────
+Route<T> appRoute<T>(Widget page) => PageRouteBuilder<T>(
+  transitionDuration: const Duration(milliseconds: 280),
+  reverseTransitionDuration: const Duration(milliseconds: 220),
+  pageBuilder: (_, __, ___) => page,
+  transitionsBuilder: (_, anim, __, child) {
+    final curved = CurvedAnimation(parent: anim, curve: Curves.easeOutCubic);
+    return FadeTransition(
+      opacity: curved,
+      child: SlideTransition(
+        position: Tween<Offset>(begin: const Offset(0, 0.04), end: Offset.zero)
+            .animate(curved),
+        child: child,
+      ),
+    );
+  },
+);
+
+// ─────────────────────────────────────────────────────────
+//  SKELETON DE CHARGEMENT (placeholder animé)
+// ─────────────────────────────────────────────────────────
+class SkeletonBox extends StatefulWidget {
+  final double? width;
+  final double height;
+  final double radius;
+  const SkeletonBox({super.key, this.width, this.height = 16, this.radius = 10});
+
+  @override
+  State<SkeletonBox> createState() => _SkeletonBoxState();
+}
+
+class _SkeletonBoxState extends State<SkeletonBox>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 900))
+    ..repeat(reverse: true);
+
+  @override
+  void dispose() { _c.dispose(); super.dispose(); }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+        animation: _c,
+        builder: (_, __) => Container(
+          width: widget.width,
+          height: widget.height,
+          decoration: BoxDecoration(
+            color: Color.lerp(const Color(0xFFE9ECEF), const Color(0xFFF4F6F8), _c.value),
+            borderRadius: BorderRadius.circular(widget.radius),
+          ),
+        ),
+      );
+}
+
+// Carte squelette générique (hauteur paramétrable)
+class SkeletonCard extends StatelessWidget {
+  final double height;
+  const SkeletonCard({super.key, this.height = 88});
+  @override
+  Widget build(BuildContext context) => Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        child: SkeletonBox(height: height, radius: 16),
+      );
+}
+
+// ─────────────────────────────────────────────────────────
 //  SNACKBAR HELPER
 // ─────────────────────────────────────────────────────────
 void showError(BuildContext context, String msg) {

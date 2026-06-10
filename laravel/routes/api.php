@@ -17,15 +17,11 @@ use Illuminate\Support\Facades\Route;
 
 // ─── ROUTES PUBLIQUES (sans authentification) ─────────────────────────────────
 Route::prefix('auth')->group(function () {
-    Route::post('/send-otp',       [AuthController::class, 'sendOtp']);
+    Route::post('/send-otp',       [AuthController::class, 'sendOtp'])->middleware('throttle:otp');
     Route::post('/verify-otp',     [AuthController::class, 'verifyOtp']);
    Route::post('/auth/register', [AuthController::class, 'registerAdmin']);
     Route::post('/join-invite',    [AuthController::class, 'joinViaInvite']);
 });
-
-// Webhook paiements (sans auth — appelé par Wave / Orange Money)
-Route::post('/cotisations/webhook', [CotisationController::class, 'webhook'])
-    ->name('webhook.paiement');
 
 // ─── ROUTES AUTHENTIFIÉES ─────────────────────────────────────────────────────
 Route::middleware('auth:api')->group(function () {
@@ -57,11 +53,12 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/{id}/tirage/historique',            [TontineController::class, 'historiqueTirage']);
     });
 
-    // Cotisations
+    // Cotisations (suivi manuel — paiement hors-app, validation par l'admin)
     Route::prefix('cotisations')->group(function () {
-        Route::get('/',             [CotisationController::class, 'index']);
-        Route::post('/initier',     [CotisationController::class, 'initierPaiement']);
-        Route::post('/verifier',    [CotisationController::class, 'verifierPaiement']);
+        Route::get('/',                  [CotisationController::class, 'index']);
+        Route::post('/initier',          [CotisationController::class, 'initierPaiement']); // membre déclare
+        Route::post('/{id}/confirmer',   [CotisationController::class, 'confirmer']);        // admin valide
+        Route::post('/{id}/rejeter',     [CotisationController::class, 'rejeter']);          // admin rejette
     });
 
     // Sutura (Urgences)

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import 'package:intl/intl.dart';
@@ -111,7 +112,9 @@ class _SuturaScreenState extends State<SuturaScreen> {
                           padding: const EdgeInsets.fromLTRB(16, 0, 16, 90),
                           itemCount: _items.length,
                           itemBuilder: (_, i) =>
-                              _SuturaCard(sutura: _items[i], onVote: _vote),
+                              _SuturaCard(key: ValueKey(_items[i].id),
+                                  sutura: _items[i], onVote: _vote,
+                                  onExpired: _load),
                         ),
                       ),
           ),
@@ -124,15 +127,69 @@ class _SuturaScreenState extends State<SuturaScreen> {
 // ─────────────────────────────────────────────────────────
 //  CARTE D'UNE DEMANDE
 // ─────────────────────────────────────────────────────────
-class _SuturaCard extends StatelessWidget {
+class _SuturaCard extends StatefulWidget {
   final Sutura sutura;
   final Future<void> Function(Sutura, bool) onVote;
-  const _SuturaCard({required this.sutura, required this.onVote});
+  final Future<void> Function() onExpired;
+  const _SuturaCard({super.key, required this.sutura, required this.onVote, required this.onExpired});
+
+  @override
+  State<_SuturaCard> createState() => _SuturaCardState();
+}
+
+class _SuturaCardState extends State<_SuturaCard> {
+  Timer? _timer;
+  bool _firedExpired = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _setupTimer();
+  }
+
+  @override
+  void didUpdateWidget(_SuturaCard old) {
+    super.didUpdateWidget(old);
+    final s = widget.sutura, o = old.sutura;
+    if (o.id != s.id || o.statut != s.statut || o.voteExpiresAt != s.voteExpiresAt) {
+      _firedExpired = false;
+      _setupTimer();
+    }
+  }
+
+  // (Re)met en place le compte à rebours selon l'état courant de l'urgence
+  void _setupTimer() {
+    _timer?.cancel();
+    _timer = null;
+    final s = widget.sutura;
+    if (s.statut == 'en_cours' && s.voteExpiresAt != null && !s.expire) {
+      _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (!mounted) return;
+        if (widget.sutura.expire) {
+          _timer?.cancel();
+          // Force la résolution côté serveur via un rechargement (une seule fois)
+          if (!_firedExpired) { _firedExpired = true; widget.onExpired(); }
+        }
+        setState(() {});
+      });
+    }
+  }
+
+  @override
+  void dispose() { _timer?.cancel(); super.dispose(); }
+
+  String _fmt(Duration d) {
+    if (d.isNegative) return '00:00';
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final sec = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$m:$sec';
+  }
 
   @override
   Widget build(BuildContext context) {
     final fmt = NumberFormat('#,###', 'fr_FR');
-    final s = sutura;
+    final s = widget.sutura;
+    final showCountdown = s.statut == 'en_cours' && s.voteExpiresAt != null;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -154,6 +211,21 @@ class _SuturaCard extends StatelessWidget {
               StatusBadge(label: s.statutLabel, color: s.statutColor),
             ],
           ),
+          if (showCountdown) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Icon(Icons.timer_outlined, size: 14,
+                    color: s.expire ? AppColors.error : AppColors.warning),
+                const SizedBox(width: 4),
+                Text(
+                  s.expire ? 'Temps écoulé' : 'Temps restant : ${_fmt(s.tempsRestant)}',
+                  style: interStyle(size: 12, weight: FontWeight.w600,
+                      color: s.expire ? AppColors.error : AppColors.warning),
+                ),
+              ],
+            ),
+          ],
           if (s.estMien) ...[
             const SizedBox(height: 6),
             Container(
@@ -184,13 +256,13 @@ class _SuturaCard extends StatelessWidget {
           ),
 
           // Actions de vote OU rappel du vote / statut
-          if (s.peutVoter) ...[
+          if (s.votable) ...[
             const SizedBox(height: 14),
             Row(
               children: [
                 Expanded(
                   child: ElevatedButton.icon(
-                    onPressed: () => onVote(s, true),
+                    onPressed: () => widget.onVote(s, true),
                     style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.success,
                         foregroundColor: Colors.white),
@@ -201,7 +273,7 @@ class _SuturaCard extends StatelessWidget {
                 const SizedBox(width: 10),
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: () => onVote(s, false),
+                    onPressed: () => widget.onVote(s, false),
                     style: OutlinedButton.styleFrom(
                         foregroundColor: AppColors.error,
                         side: const BorderSide(color: AppColors.error)),
@@ -216,6 +288,10 @@ class _SuturaCard extends StatelessWidget {
             Text(s.monVote == true ? 'Vous avez approuvé' : 'Vous avez refusé',
                 style: interStyle(size: 12, weight: FontWeight.w600,
                     color: s.monVote == true ? AppColors.success : AppColors.error)),
+          ] else if (s.statut == 'en_cours' && s.expire) ...[
+            const SizedBox(height: 10),
+            Text('Vote clôturé (délai écoulé)',
+                style: interStyle(size: 12, color: AppColors.textLight)),
           ],
         ],
       ),
@@ -247,6 +323,7 @@ class _NewSuturaSheetState extends State<_NewSuturaSheet> {
   final _api = ApiService();
   final _montCtrl = TextEditingController();
   final _motifCtrl = TextEditingController();
+  int _duree = 10; // minutes (5 ou 10)
   bool _loading = false;
 
   @override
@@ -260,7 +337,7 @@ class _NewSuturaSheetState extends State<_NewSuturaSheet> {
 
     setState(() => _loading = true);
     try {
-      await _api.createSutura(widget.tontine.id, montant, motif);
+      await _api.createSutura(widget.tontine.id, montant, motif, _duree);
       if (!mounted) return;
       showSuccess(context, 'Demande soumise anonymement');
       widget.onDone();
@@ -305,6 +382,36 @@ class _NewSuturaSheetState extends State<_NewSuturaSheet> {
               AppField(controller: _motifCtrl, label: 'Motif',
                   hint: 'Expliquez brièvement votre besoin (min. 10 caractères)',
                   prefixIcon: Icons.notes_outlined),
+              const SizedBox(height: 16),
+              Text('Durée du vote',
+                  style: interStyle(size: 13, weight: FontWeight.w600,
+                      color: AppColors.textDark)),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  for (final d in [5, 10])
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () => setState(() => _duree = d),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          margin: EdgeInsets.only(right: d == 5 ? 8 : 0),
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          decoration: BoxDecoration(
+                            color: _duree == d ? AppColors.primary : AppColors.surface,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                                color: _duree == d ? AppColors.primary : AppColors.border),
+                          ),
+                          child: Text('$d minutes',
+                              textAlign: TextAlign.center,
+                              style: interStyle(size: 13, weight: FontWeight.w600,
+                                  color: _duree == d ? Colors.white : AppColors.textGrey)),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
               const SizedBox(height: 24),
               PrimaryButton(label: 'Soumettre la demande',
                   onPressed: _submit, loading: _loading),

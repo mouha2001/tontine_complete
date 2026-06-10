@@ -153,7 +153,7 @@ class _TontineCard extends StatelessWidget {
 
     return GestureDetector(
       onTap: () => Navigator.push(context,
-          MaterialPageRoute(builder: (_) => TontineDetailScreen(tontine: tontine))),
+          appRoute(TontineDetailScreen(tontine: tontine))),
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
         padding: const EdgeInsets.all(18),
@@ -312,6 +312,7 @@ class _TontineDetailScreenState extends State<TontineDetailScreen> {
             expandedHeight: 210,
             pinned: true,
             backgroundColor: AppColors.primary,
+            foregroundColor: Colors.white,
             surfaceTintColor: Colors.transparent,
             flexibleSpace: FlexibleSpaceBar(
               background: Container(
@@ -429,8 +430,8 @@ class _TontineDetailScreenState extends State<TontineDetailScreen> {
                   SizedBox(
                     width: double.infinity,
                     child: OutlinedButton.icon(
-                      onPressed: () => Navigator.push(context, MaterialPageRoute(
-                          builder: (_) => SuturaScreen(tontine: t))),
+                      onPressed: () => Navigator.push(context,
+                          appRoute(SuturaScreen(tontine: t))),
                       icon: const Icon(Icons.health_and_safety_outlined, size: 18),
                       label: const Text('Demandes d\'urgence (Sutura)'),
                     ),
@@ -487,8 +488,8 @@ class _TontineDetailScreenState extends State<TontineDetailScreen> {
             children: [
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed: () => Navigator.push(context, MaterialPageRoute(
-                      builder: (_) => CotisationsScreen(tontine: widget.tontine))),
+                  onPressed: () => Navigator.push(context,
+                      appRoute(CotisationsScreen(tontine: widget.tontine))),
                   icon: const Icon(Icons.list_alt_rounded, size: 18),
                   label: const Text('Cotisations'),
                 ),
@@ -496,8 +497,8 @@ class _TontineDetailScreenState extends State<TontineDetailScreen> {
               const SizedBox(width: 12),
               Expanded(
                 child: ElevatedButton.icon(
-                  onPressed: () => Navigator.push(context, MaterialPageRoute(
-                      builder: (_) => CotisationsScreen(
+                  onPressed: () => Navigator.push(context,
+                      appRoute(CotisationsScreen(
                           tontine: widget.tontine, openPay: true))),
                   style: ElevatedButton.styleFrom(backgroundColor: AppColors.accent),
                   icon: const Icon(Icons.payment_rounded, size: 18),

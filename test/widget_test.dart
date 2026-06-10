@@ -130,6 +130,34 @@ void main() {
       expect(d.rappels.first.tontineNom, 'T');
       expect(d.rappels.first.montant, 10000);
     });
+
+    test('Cotisation statuts alignés (confirme/echoue/en_attente)', () {
+      expect(Cotisation.fromJson({'id': 1, 'statut': 'confirme', 'montant': 5000})
+          .statutLabel, 'Confirmée');
+      expect(Cotisation.fromJson({'id': 2, 'statut': 'echoue', 'montant': 5000})
+          .statutLabel, 'Rejetée');
+      expect(Cotisation.fromJson({'id': 3, 'statut': 'en_attente', 'montant': 5000})
+          .statutLabel, 'En attente');
+    });
+
+    test('Sutura lit vote_expires_at et calcule expire/votable', () {
+      final future = DateTime.now().add(const Duration(minutes: 5)).toUtc().toIso8601String();
+      final s = Sutura.fromJson({
+        'id': 1, 'tontine_id': 2, 'montant_demande': 50000, 'motif': 'x',
+        'statut': 'en_cours', 'peut_voter': true, 'vote_expires_at': future,
+      });
+      expect(s.voteExpiresAt, isNotNull);
+      expect(s.expire, isFalse);
+      expect(s.votable, isTrue);
+
+      final past = DateTime.now().subtract(const Duration(minutes: 1)).toUtc().toIso8601String();
+      final s2 = Sutura.fromJson({
+        'id': 1, 'tontine_id': 2, 'montant_demande': 50000, 'motif': 'x',
+        'statut': 'en_cours', 'peut_voter': true, 'vote_expires_at': past,
+      });
+      expect(s2.expire, isTrue);
+      expect(s2.votable, isFalse);
+    });
   });
 
   testWidgets('LoginScreen démarre sur l\'étape numéro', (tester) async {

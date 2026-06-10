@@ -34,6 +34,9 @@ class SuturaController extends Controller
         $suturas = $query->orderByDesc('created_at')->get();
         $userId  = $user->id;
 
+        // Clôture lazy : toute urgence dont le délai est écoulé est résolue ici
+        $suturas->each(fn($s) => $this->calculerResultat($s));
+
         return response()->json([
             'data' => $suturas->map(fn($s) => $this->formatSutura($s, $userId))->values(),
         ]);
@@ -46,6 +49,7 @@ class SuturaController extends Controller
             'tontine_id'      => 'required|integer|exists:tontines,id',
             'montant_demande' => 'required|numeric|min:1',
             'motif'           => 'required|string|min:10|max:500',
+            'duree_minutes'   => 'nullable|integer|in:5,10',
         ]);
 
         $user    = $request->user();
@@ -66,22 +70,25 @@ class SuturaController extends Controller
             return response()->json(['message' => 'Vous avez déjà une urgence en cours'], 422);
         }
 
+        $duree = (int) ($request->duree_minutes ?? 10); // minutes (5 ou 10)
+
         $sutura = Sutura::create([
-            'tontine_id'     => $tontine->id,
-            'demandeur_id'   => $user->id, // stocké en DB mais jamais exposé dans l'API
+            'tontine_id'      => $tontine->id,
+            'demandeur_id'    => $user->id, // stocké en DB mais jamais exposé dans l'API
             'montant_demande' => $request->montant_demande,
-            'motif'          => $request->motif,
-            'statut'         => 'en_cours',
+            'motif'           => $request->motif,
+            'statut'          => 'en_cours',
+            'vote_expires_at' => now()->addMinutes($duree),
         ]);
 
-        // Notifier TOUS les membres (anonyme côté UI)
-        $tontine->membres->each(function ($membre) use ($sutura, $tontine) {
+        // Notifier TOUS les membres — notification URGENTE (anonyme côté UI)
+        $tontine->membres->each(function ($membre) use ($sutura, $tontine, $duree) {
             if ($membre->id !== $sutura->demandeur_id) {
                 $this->notifService->send(
                     $membre->id,
-                    'vote_sutura',
-                    '🤝 Sutura — Vote requis',
-                    "Un membre a soumis une demande d'urgence de {$sutura->montant_demande} FCFA dans {$tontine->nom}",
+                    'sutura_urgent',
+                    '🚨 URGENCE — Vote requis',
+                    "Demande d'urgence de {$sutura->montant_demande} FCFA dans {$tontine->nom}. Votez vite : {$duree} min pour décider.",
                     ['tontine_id' => $tontine->id, 'sutura_id' => $sutura->id],
                 );
             }
@@ -100,6 +107,10 @@ class SuturaController extends Controller
 
         $user   = $request->user();
         $sutura = Sutura::with('tontine.membres')->findOrFail($id);
+
+        // Clôture lazy si le délai de vote est déjà écoulé
+        $this->calculerResultat($sutura);
+        $sutura->refresh();
 
         if ($sutura->statut !== 'en_cours') {
             return response()->json(['message' => 'Le vote est clôturé'], 422);
@@ -139,6 +150,8 @@ class SuturaController extends Controller
     // ─── CALCUL RÉSULTAT ──────────────────────────────────────────────────────
     private function calculerResultat(Sutura $sutura): void
     {
+        if ($sutura->statut !== 'en_cours') return; // idempotent (sûr en boucle/lazy)
+
         // Votants éligibles = membres - 1 (le demandeur ne vote pas)
         $eligible = max(1, $sutura->tontine->membres()->count() - 1);
         $needed   = intdiv($eligible, 2) + 1; // majorité stricte
@@ -154,14 +167,22 @@ class SuturaController extends Controller
             $approuve = false;
         } elseif ($totalVotes >= $eligible) {
             $approuve = false; // tous ont voté sans majorité « oui » → rejetée
+        } elseif ($sutura->vote_expires_at && $sutura->vote_expires_at->isPast()) {
+            $approuve = false; // délai de vote écoulé sans majorité absolue → rejetée
         } else {
             return; // résultat pas encore décidé
         }
 
-        $sutura->update([
-            'statut'      => $approuve ? 'approuve' : 'rejete',
-            'resultat_at' => now(),
-        ]);
+        // Décision atomique : en cas de votes/lectures concurrents, une seule
+        // requête « gagne » le passage en_cours → résolu (et envoie les notifs).
+        $affected = Sutura::whereKey($sutura->id)
+            ->where('statut', 'en_cours')
+            ->update([
+                'statut'      => $approuve ? 'approuve' : 'rejete',
+                'resultat_at' => now(),
+            ]);
+        if ($affected === 0) return; // déjà résolu par une requête concurrente
+        $sutura->statut = $approuve ? 'approuve' : 'rejete'; // refléter en mémoire
 
         // Notifier le demandeur (anonymat préservé — on notifie via user_id interne)
         $this->notifService->send(
@@ -192,6 +213,7 @@ class SuturaController extends Controller
         $monVote   = $s->votes()->where('user_id', $currentUserId)->first();
         $eligible  = max(1, $s->tontine->membres()->count() - 1);
         $estMien   = $s->demandeur_id === $currentUserId; // visible UNIQUEMENT par le demandeur
+        $expire    = $s->vote_expires_at && $s->vote_expires_at->isPast();
 
         return [
             'id'              => $s->id,
@@ -205,7 +227,8 @@ class SuturaController extends Controller
             'total_eligibles' => $eligible,
             'mon_vote'        => $monVote ? $monVote->approuve : null,
             'est_mien'        => $estMien,
-            'peut_voter'      => $s->statut === 'en_cours' && !$estMien && $monVote === null,
+            'peut_voter'      => $s->statut === 'en_cours' && !$expire && !$estMien && $monVote === null,
+            'vote_expires_at' => $s->vote_expires_at?->toISOString(),
             // JAMAIS exposé : demandeur_id (anonymat). est_mien est calculé par utilisateur.
             'tontine'         => $s->tontine ? ['nom' => $s->tontine->nom] : null,
             'resultat_at'     => $s->resultat_at?->toISOString(),

@@ -2,7 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class ApiService {
-  static const String baseUrl = 'http://192.168.1.10:8000/api';
+  static const String baseUrl = 'http://localhost:8000/api';
 
   static const _storage = FlutterSecureStorage();
   late final Dio _dio;
@@ -151,6 +151,16 @@ class ApiService {
     return res.data;
   }
 
+  Future<Map<String, dynamic>> confirmerCotisation(int id) async {
+    final res = await _dio.post('/cotisations/$id/confirmer');
+    return res.data;
+  }
+
+  Future<Map<String, dynamic>> rejeterCotisation(int id) async {
+    final res = await _dio.post('/cotisations/$id/rejeter');
+    return res.data;
+  }
+
   // =====================================================
   // SUTURA
   // =====================================================
@@ -162,11 +172,12 @@ class ApiService {
   }
 
   Future<Map<String, dynamic>> createSutura(
-      int tontineId, double montant, String motif) async {
+      int tontineId, double montant, String motif, int dureeMinutes) async {
     final res = await _dio.post('/sutura', data: {
       'tontine_id': tontineId,
       'montant_demande': montant,
       'motif': motif,
+      'duree_minutes': dureeMinutes,
     });
     return res.data;
   }
