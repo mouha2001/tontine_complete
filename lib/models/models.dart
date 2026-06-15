@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 
+// Libellé « Mois Année » en français (sans dépendance de locale intl)
+const _moisFr = ['', 'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
+  'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
+String moisAnnee(DateTime d) => '${_moisFr[d.month]} ${d.year}';
+
 // ── USER ──────────────────────────────────────────────────
 class User {
   final int id;
@@ -112,7 +117,7 @@ class Cotisation {
   final double montant;
   final String statut;
   final DateTime? datePaiement;
-  final String? periode;
+  final DateTime? periode;
 
   Cotisation({required this.id, required this.tontineId, required this.userId,
               this.userName, required this.montant, required this.statut,
@@ -125,9 +130,13 @@ class Cotisation {
     userName: j['user'] != null ? '${j['user']['prenom']} ${j['user']['nom']}' : null,
     montant: double.tryParse('${j['montant'] ?? 0}') ?? 0,
     statut: j['statut'] ?? 'en_attente',
-    datePaiement: j['date_paiement'] != null ? DateTime.tryParse(j['date_paiement']) : null,
-    periode: j['periode_concernee'],
+    datePaiement: (j['paye_le'] ?? j['date_paiement']) != null
+        ? DateTime.tryParse(j['paye_le'] ?? j['date_paiement'])?.toLocal()
+        : null,
+    periode: j['periode'] != null ? DateTime.tryParse(j['periode']) : null,
   );
+
+  String? get periodeLabel => periode == null ? null : moisAnnee(periode!);
 
   Color get color {
     switch (statut) {

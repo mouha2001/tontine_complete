@@ -14,6 +14,7 @@ class Cotisation extends Model
         'user_id',
         'montant',
         'statut',
+        'periode',
         'methode_paiement',
         'reference',
         'receipt_url',
@@ -23,6 +24,7 @@ class Cotisation extends Model
 
     protected $casts = [
         'paye_le' => 'datetime',
+        'periode' => 'date',
         'montant' => 'decimal:2',
     ];
 

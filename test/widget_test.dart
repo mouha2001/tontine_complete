@@ -140,6 +140,16 @@ void main() {
           .statutLabel, 'En attente');
     });
 
+    test('Cotisation lit periode (date) + periodeLabel FR et paye_le', () {
+      final c = Cotisation.fromJson({
+        'id': 1, 'statut': 'confirme', 'montant': 10000,
+        'periode': '2026-07-01', 'paye_le': '2026-06-15T10:00:00.000000Z',
+      });
+      expect(c.periode, isNotNull);
+      expect(c.periodeLabel, 'Juillet 2026');
+      expect(c.datePaiement, isNotNull); // mappé depuis paye_le (et non date_paiement)
+    });
+
     test('Sutura lit vote_expires_at et calcule expire/votable', () {
       final future = DateTime.now().add(const Duration(minutes: 5)).toUtc().toIso8601String();
       final s = Sutura.fromJson({

@@ -78,11 +78,20 @@ class DashboardController extends Controller
 
             if ($parts === 0) continue; // pas membre
 
+            // Couvert si une cotisation confirmée vise CE mois (période) — un
+            // paiement fait à l'avance compte ; fallback legacy sur paye_le.
             $aPaye = Cotisation::where('tontine_id', $t->id)
                 ->where('user_id', $user->id)
                 ->where('statut', 'confirme')
-                ->whereYear('paye_le', now()->year)
-                ->whereMonth('paye_le', now()->month)
+                ->where(function ($q) {
+                    $q->where(fn($q2) => $q2
+                            ->whereYear('periode', now()->year)
+                            ->whereMonth('periode', now()->month))
+                      ->orWhere(fn($q2) => $q2
+                            ->whereNull('periode')
+                            ->whereYear('paye_le', now()->year)
+                            ->whereMonth('paye_le', now()->month));
+                })
                 ->exists();
 
             if (!$aPaye) {

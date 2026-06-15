@@ -220,8 +220,10 @@ class _CotList extends StatelessWidget {
                         Text(c.userName ?? 'Membre',
                             style: interStyle(size: 13, weight: FontWeight.w600,
                                 color: AppColors.textDark)),
-                        if (c.periode != null)
-                          Text(c.periode!, style: interStyle(size: 12)),
+                        if (c.periodeLabel != null)
+                          Text(c.periodeLabel!,
+                              style: interStyle(size: 12,
+                                  weight: FontWeight.w600, color: AppColors.accent)),
                         if (c.datePaiement != null)
                           Text(DateFormat('dd/MM/yyyy').format(c.datePaiement!),
                               style: interStyle(size: 11)),
@@ -295,6 +297,13 @@ class _PaySheetState extends State<_PaySheet> {
   String _methode = 'wave';
   bool _loading   = false;
 
+  // 'now' capturé une seule fois → la période sélectionnée reste toujours
+  // l'une des options proposées (même si la feuille reste ouverte à travers minuit).
+  final DateTime _now = DateTime.now();
+  late final List<DateTime> _moisOptions =
+      List.generate(4, (i) => DateTime(_now.year, _now.month + i, 1));
+  late DateTime _periode = _moisOptions.first;
+
   int get _mesParts => widget.tontine.mesParts > 0 ? widget.tontine.mesParts : 1;
   double get _montantDu => widget.tontine.montantCotisation * _mesParts;
 
@@ -312,6 +321,8 @@ class _PaySheetState extends State<_PaySheet> {
         'montant': _montantDu,
         'methode_paiement': _methode,
         'reference': _refCtrl.text.trim(),
+        'periode': '${_periode.year.toString().padLeft(4, '0')}'
+            '-${_periode.month.toString().padLeft(2, '0')}-01',
       });
       if (!mounted) return;
       showSuccess(context, 'Cotisation enregistrée, en attente de validation');
@@ -363,6 +374,38 @@ class _PaySheetState extends State<_PaySheet> {
                     ),
                 ],
               ),
+            ),
+            const SizedBox(height: 20),
+            Text('Mois concerné',
+                style: interStyle(size: 13, weight: FontWeight.w600,
+                    color: AppColors.textDark)),
+            const SizedBox(height: 4),
+            Text('Vous pouvez payer à l\'avance pour un mois à venir.',
+                style: interStyle(size: 11, color: AppColors.textLight)),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8, runSpacing: 8,
+              children: _moisOptions.map((m) {
+                final sel = m.year == _periode.year && m.month == _periode.month;
+                final now = DateTime.now();
+                final isCurrent = m.year == now.year && m.month == now.month;
+                return GestureDetector(
+                  onTap: () => setState(() => _periode = m),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                    decoration: BoxDecoration(
+                      color: sel ? AppColors.accent : AppColors.surface,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                          color: sel ? AppColors.accent : AppColors.border),
+                    ),
+                    child: Text(isCurrent ? '${moisAnnee(m)} (ce mois)' : moisAnnee(m),
+                        style: interStyle(size: 12, weight: FontWeight.w600,
+                            color: sel ? Colors.white : AppColors.textGrey)),
+                  ),
+                );
+              }).toList(),
             ),
             const SizedBox(height: 20),
             Text('Méthode de paiement',

@@ -36,10 +36,12 @@ return [
     ],
 
     // SMS / OTP — DExchange SMS (https://docs.dexchange-sms.com)
+    // ⚠️ Clé câblée en dur (fallback). Surchargeable via DEXCHANGE_SMS_KEY dans .env.
+    //    À faire tourner / déplacer en variable d'env si le dépôt est partagé.
     'dexchange' => [
         'url'       => env('DEXCHANGE_SMS_URL', 'https://api-v2.dexchange-sms.com/api/v1'),
-        'key'       => env('DEXCHANGE_SMS_KEY'),
-        'signature' => env('DEXCHANGE_SMS_SIGNATURE', 'DEXCHANGE'),
+        'key'       => env('DEXCHANGE_SMS_KEY') ?: 'API-KEY-939fa6f7-afd4-4778-beec-cb78856ded8d',
+        'signature' => env('DEXCHANGE_SMS_SIGNATURE', 'MARKETIFLY'),
     ],
 
 ];

@@ -7,6 +7,7 @@ use App\Models\Tontine;
 use App\Services\NotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 
 class CotisationController extends Controller
@@ -50,6 +51,7 @@ class CotisationController extends Controller
             'tontine_id'       => 'required|integer|exists:tontines,id',
             'methode_paiement' => 'required|in:wave,orange_money,free_money,cash',
             'reference'        => 'nullable|string|max:100',
+            'periode'          => 'nullable|date',
         ]);
 
         $user    = $request->user();
@@ -63,12 +65,27 @@ class CotisationController extends Controller
 
         $montant = $tontine->montant_cotisation * (int) $parts;
 
-        // Anti-doublon : une seule cotisation en attente par membre et par tontine
+        // Mois ciblé : mois courant par défaut, ou un mois FUTUR (cotisation à l'avance).
+        // On interdit un mois passé.
+        $periode = $request->filled('periode')
+            ? Carbon::parse($request->periode)->startOfMonth()
+            : now()->startOfMonth();
+        if ($periode->lt(now()->startOfMonth())) {
+            return response()->json([
+                'message' => 'On ne peut cotiser que pour le mois en cours ou à l\'avance',
+            ], 422);
+        }
+
+        $moisLabel = $periode->locale('fr')->translatedFormat('F Y');
+
+        // Anti-doublon PAR MOIS : pas deux cotisations actives pour le même mois
+        // (mais on peut payer plusieurs mois différents à l'avance).
         if (Cotisation::where('tontine_id', $tontine->id)
                 ->where('user_id', $user->id)
-                ->where('statut', 'en_attente')->exists()) {
+                ->whereDate('periode', $periode->toDateString())
+                ->whereIn('statut', ['en_attente', 'confirme'])->exists()) {
             return response()->json([
-                'message' => 'Vous avez déjà une cotisation en attente de validation',
+                'message' => "Vous avez déjà une cotisation pour {$moisLabel}",
             ], 422);
         }
 
@@ -77,6 +94,7 @@ class CotisationController extends Controller
             'user_id'          => $user->id,
             'montant'          => $montant,
             'statut'           => 'en_attente',
+            'periode'          => $periode,
             'methode_paiement' => $request->methode_paiement,
             'reference'        => $request->reference ?: 'COT-' . strtoupper(Str::random(10)),
         ]);
@@ -86,7 +104,7 @@ class CotisationController extends Controller
             $tontine->admin_id,
             'cotisation_a_valider',
             '💳 Cotisation à valider',
-            trim("{$user->prenom} {$user->nom}") . " a déclaré une cotisation de {$montant} FCFA ({$tontine->nom})",
+            trim("{$user->prenom} {$user->nom}") . " a déclaré une cotisation de {$montant} FCFA pour {$moisLabel} ({$tontine->nom})",
             ['tontine_id' => $tontine->id, 'cotisation_id' => $cotisation->id],
         );
 
@@ -166,6 +184,7 @@ class CotisationController extends Controller
             'tontine_id'       => $c->tontine_id,
             'montant'          => $c->montant,
             'statut'           => $c->statut,
+            'periode'          => $c->periode?->toDateString(),
             'methode_paiement' => $c->methode_paiement,
             'reference'        => $c->reference,
             'paye_le'          => $c->paye_le?->toISOString(),
