@@ -252,9 +252,11 @@ class TontineDetailScreen extends StatefulWidget {
 
 class _TontineDetailScreenState extends State<TontineDetailScreen> {
   final _api = ApiService();
+  late Tontine _tontine = widget.tontine;
   List<Tirage> _tirages = [];
   bool _loading = true;
   bool _tirageEnCours = false;
+  bool _activerEnCours = false;
 
   @override
   void initState() { super.initState(); _load(); }
@@ -289,6 +291,21 @@ class _TontineDetailScreenState extends State<TontineDetailScreen> {
     }
   }
 
+  // Active la tontine (admin) → débloque les tirages
+  Future<void> _activer() async {
+    setState(() => _activerEnCours = true);
+    try {
+      final res = await _api.activerTontine(widget.tontine.id);
+      if (!mounted) return;
+      setState(() => _tontine = Tontine.fromJson(res['data']));
+      showSuccess(context, 'Tontine activée 🎉');
+    } catch (_) {
+      if (mounted) showError(context, 'Activation impossible');
+    } finally {
+      if (mounted) setState(() => _activerEnCours = false);
+    }
+  }
+
   // Ouvre la feuille de partage native avec le code + lien d'invitation
   void _shareInvite(Tontine t) {
     final msg = StringBuffer()
@@ -301,7 +318,7 @@ class _TontineDetailScreenState extends State<TontineDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final t   = widget.tontine;
+    final t   = _tontine;
     final fmt = NumberFormat('#,###', 'fr_FR');
 
     return Scaffold(
@@ -438,8 +455,31 @@ class _TontineDetailScreenState extends State<TontineDetailScreen> {
                   ),
                   const SizedBox(height: 24),
 
-                  // Tirage du mois (admin uniquement, tontine active)
-                  Text('Tirage mensuel',
+                  // Activation (admin, tontine en attente)
+                  if (t.estAdmin && t.statut == 'en_attente') ...[
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: _activerEnCours ? null : _activer,
+                        style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.success,
+                            foregroundColor: Colors.white),
+                        icon: _activerEnCours
+                            ? const SizedBox(width: 16, height: 16,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: Colors.white))
+                            : const Icon(Icons.play_circle_outline_rounded, size: 18),
+                        label: const Text('Activer la tontine'),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text('Une fois active, vous pourrez lancer les tirages.',
+                        style: interStyle(size: 12, color: AppColors.textLight)),
+                    const SizedBox(height: 20),
+                  ],
+
+                  // Tirage (admin uniquement, tontine active)
+                  Text('Tirage',
                       style: soraStyle(size: 16, weight: FontWeight.w700)),
                   const SizedBox(height: 12),
                   if (t.estAdmin && t.statut == 'active')
@@ -455,10 +495,10 @@ class _TontineDetailScreenState extends State<TontineDetailScreen> {
                                 child: CircularProgressIndicator(
                                     strokeWidth: 2, color: Colors.white))
                             : const Icon(Icons.casino_rounded, size: 18),
-                        label: const Text('Lancer le tirage du mois'),
+                        label: const Text('Lancer le tirage'),
                       ),
                     )
-                  else if (t.statut != 'active')
+                  else if (t.statut != 'active' && !t.estAdmin)
                     Text('Le tirage sera disponible une fois la tontine active.',
                         style: interStyle(size: 13, color: AppColors.textLight)),
                   const SizedBox(height: 16),
@@ -666,6 +706,7 @@ class _CreateSheetState extends State<_CreateSheet> {
             spacing: 8, runSpacing: 8,
             children: [
               for (final f in const [
+                ['2min', '2 min (test)'],
                 ['quotidien', 'Quotidien'],
                 ['hebdomadaire', 'Hebdo'],
                 ['bimensuel', '2×/mois'],

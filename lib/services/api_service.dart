@@ -105,6 +105,11 @@ class ApiService {
     return res.data;
   }
 
+  Future<Map<String, dynamic>> activerTontine(int id) async {
+    final res = await _dio.put('/tontines/$id', data: {'statut': 'active'});
+    return res.data;
+  }
+
   Future<Map<String, dynamic>> joinTontine(String code, {int parts = 1}) async {
     final res = await _dio.post('/tontines/join', data: {
       'invite_code': code,

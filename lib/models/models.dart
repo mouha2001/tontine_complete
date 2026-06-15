@@ -99,6 +99,7 @@ class Tontine {
 
   String get frequenceLabel {
     switch (frequence) {
+      case '2min': return '2 min (test)';
       case 'quotidien': return 'Quotidien';
       case 'hebdomadaire': return 'Hebdomadaire';
       case 'bimensuel': return 'Bimensuel';
@@ -199,6 +200,7 @@ class Sutura {
   final bool? monVote;         // null = pas encore voté
   final bool estMien;          // visible uniquement par le demandeur (anonymat)
   final bool peutVoter;
+  final bool honoree;          // urgence approuvée déjà honorée par un tirage
   final DateTime? voteExpiresAt;
   final DateTime? createdAt;
 
@@ -207,7 +209,7 @@ class Sutura {
     required this.motif, required this.statut, this.votesOui = 0,
     this.votesNon = 0, this.totalVotants = 0, this.totalEligibles = 0,
     this.monVote, this.estMien = false, this.peutVoter = false,
-    this.voteExpiresAt, this.createdAt,
+    this.honoree = false, this.voteExpiresAt, this.createdAt,
   });
 
   factory Sutura.fromJson(Map<String, dynamic> j) => Sutura(
@@ -223,6 +225,7 @@ class Sutura {
     monVote: j['mon_vote'],
     estMien: j['est_mien'] == true,
     peutVoter: j['peut_voter'] == true,
+    honoree: j['honoree'] == true,
     voteExpiresAt: j['vote_expires_at'] != null
         ? DateTime.tryParse(j['vote_expires_at'])?.toLocal()
         : null,
@@ -240,6 +243,7 @@ class Sutura {
   bool get votable => peutVoter && !expire;
 
   String get statutLabel {
+    if (honoree) return 'Honorée';
     switch (statut) {
       case 'approuve': return 'Approuvée';
       case 'rejete': return 'Rejetée';

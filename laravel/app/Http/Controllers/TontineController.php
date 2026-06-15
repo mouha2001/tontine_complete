@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Tontine;
 use App\Models\Tirage;
+use App\Models\Sutura;
 use App\Services\NotificationService;
 use App\Services\TontineMembershipService;
 use Illuminate\Http\Request;
@@ -49,7 +50,7 @@ class TontineController extends Controller
             'nom'                => 'required|string|max:100',
             'description'        => 'nullable|string|max:500',
             'montant_cotisation' => 'required|numeric|min:500',
-            'frequence'          => 'required|in:quotidien,hebdomadaire,bimensuel,mensuel,bimestriel',
+            'frequence'          => 'required|in:2min,quotidien,hebdomadaire,bimensuel,mensuel,bimestriel',
             'nombre_membres'     => 'required|integer|min:2|max:50', // = nombre total de parts/tours
             'nombre_parts'       => 'nullable|integer|min:1|max:3',  // parts prises par le créateur
             'date_debut'         => 'nullable|date|after_or_equal:today',
@@ -114,7 +115,7 @@ class TontineController extends Controller
             'nom'                => 'sometimes|string|max:100',
             'description'        => 'nullable|string|max:500',
             'montant_cotisation' => 'sometimes|numeric|min:500',
-            'frequence'          => 'sometimes|in:quotidien,hebdomadaire,bimensuel,mensuel,bimestriel',
+            'frequence'          => 'sometimes|in:2min,quotidien,hebdomadaire,bimensuel,mensuel,bimestriel',
             'nombre_membres'     => 'sometimes|integer|min:2|max:50',
             'statut'             => 'sometimes|in:en_attente,active,terminee',
             'date_debut'         => 'nullable|date',
@@ -202,13 +203,21 @@ class TontineController extends Controller
             return response()->json(['message' => 'La tontine doit être active pour lancer le tirage'], 422);
         }
 
-        // Tirage mensuel : un seul tirage par mois calendaire
-        $dejaCeMois = Tirage::where('tontine_id', $tontine->id)
-            ->whereYear('created_at', now()->year)
-            ->whereMonth('created_at', now()->month)
+        // Un seul tirage par période, selon la fréquence de la tontine
+        // (la fréquence "2min" permet d'enchaîner les tirages pour les tests).
+        $cutoff = match ($tontine->frequence) {
+            '2min'         => now()->subMinutes(2),
+            'quotidien'    => now()->subDay(),
+            'hebdomadaire' => now()->subWeek(),
+            'bimensuel'    => now()->subDays(15),
+            'bimestriel'   => now()->subMonths(2),
+            default        => now()->subMonth(), // mensuel
+        };
+        $dejaTire = Tirage::where('tontine_id', $tontine->id)
+            ->where('created_at', '>', $cutoff)
             ->exists();
-        if ($dejaCeMois) {
-            return response()->json(['message' => 'Un tirage a déjà été effectué ce mois-ci'], 422);
+        if ($dejaTire) {
+            return response()->json(['message' => 'Un tirage a déjà eu lieu pour cette période'], 422);
         }
 
         // Parts n'ayant pas encore reçu les fonds (un membre à N parts reste
@@ -221,8 +230,23 @@ class TontineController extends Controller
             return response()->json(['message' => 'Toutes les parts ont déjà reçu les fonds'], 422);
         }
 
-        // Tirage aléatoire parmi les parts restantes
-        $gagnant = $eligibles->random();
+        // Priorité aux urgences : si une demande Sutura approuvée n'a pas encore
+        // été honorée, c'est son demandeur qui gagne ce tour (s'il est encore
+        // éligible). Sinon, tirage aléatoire normal.
+        // Anonymat préservé : l'annonce du gagnant reste identique à un tirage normal.
+        $gagnant = null;
+        $urgence = Sutura::where('tontine_id', $tontine->id)
+            ->where('statut', 'approuve')
+            ->whereNull('paye_le')
+            ->orderBy('resultat_at')
+            ->first();
+        if ($urgence) {
+            $gagnant = $eligibles->firstWhere('id', $urgence->demandeur_id);
+            if ($gagnant) {
+                $urgence->update(['paye_le' => now()]); // urgence honorée
+            }
+        }
+        $gagnant ??= $eligibles->random();
 
         // Le pot d'un tour = cotisation × total des parts de la tontine
         $tirage = Tirage::create([

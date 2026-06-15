@@ -168,6 +168,15 @@ void main() {
       expect(s2.expire, isTrue);
       expect(s2.votable, isFalse);
     });
+
+    test('Sutura honorée par un tirage → statutLabel « Honorée »', () {
+      final s = Sutura.fromJson({
+        'id': 1, 'tontine_id': 2, 'montant_demande': 15000, 'motif': 'x',
+        'statut': 'approuve', 'honoree': true,
+      });
+      expect(s.honoree, isTrue);
+      expect(s.statutLabel, 'Honorée');
+    });
   });
 
   testWidgets('LoginScreen démarre sur l\'étape numéro', (tester) async {

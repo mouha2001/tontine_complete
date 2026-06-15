@@ -228,6 +228,7 @@ class SuturaController extends Controller
             'mon_vote'        => $monVote ? $monVote->approuve : null,
             'est_mien'        => $estMien,
             'peut_voter'      => $s->statut === 'en_cours' && !$expire && !$estMien && $monVote === null,
+            'honoree'         => $s->statut === 'approuve' && $s->paye_le !== null,
             'vote_expires_at' => $s->vote_expires_at?->toISOString(),
             // JAMAIS exposé : demandeur_id (anonymat). est_mien est calculé par utilisateur.
             'tontine'         => $s->tontine ? ['nom' => $s->tontine->nom] : null,

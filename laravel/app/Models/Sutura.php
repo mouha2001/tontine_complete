@@ -17,11 +17,13 @@ class Sutura extends Model
         'statut',
         'vote_expires_at',
         'resultat_at',
+        'paye_le',
     ];
 
     protected $casts = [
         'vote_expires_at' => 'datetime',
         'resultat_at'     => 'datetime',
+        'paye_le'         => 'datetime',
     ];
 
     public function demandeur()
